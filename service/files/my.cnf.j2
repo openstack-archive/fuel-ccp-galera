@@ -1,0 +1,34 @@
+[mysqld]
+bind-address = 0.0.0.0
+port = {{ percona.port.cont }}
+
+datadir = /var/lib/mysql
+log-error = /var/log/ccp/mysql/mysql.log
+max_connections = 10000
+skip-name-resolve
+
+character-set-server = utf8
+collation-server = utf8_general_ci
+
+default_storage_engine = InnoDB
+binlog_format = ROW
+
+innodb_autoinc_lock_mode = 2
+innodb_buffer_pool_size = 512M
+innodb_file_per_table = 1
+innodb_flush_log_at_trx_commit = 2
+innodb_flush_method = O_DIRECT
+innodb_io_capacity = 500
+innodb_read_io_threads = 8
+innodb_write_io_threads = 8
+
+open_files_limit = 102400
+
+wsrep_slave_threads = 4
+wsrep_cluster_address = gcomm://
+wsrep_provider = /usr/lib/galera3/libgalera_smm.so
+
+wsrep_cluster_name = {{ percona.cluster_name }}
+
+wsrep_sst_method = xtrabackup-v2
+wsrep_sst_auth = "root:"

@@ -1,0 +1,53 @@
+service:
+  name: {{ service.database }}
+  kind: DaemonSet
+  ports:
+    - {{ percona.port }}
+  containers:
+    - name: galera
+      image: percona
+      probes:
+        readiness: "/opt/ccp/bin/percona_readiness.py"
+        liveness:
+          command: "true"
+          type: "exec"
+      volumes:
+        - name: mysql-logs
+          path: "/var/log/ccp/mysql"
+          type: host
+          readOnly: false
+        - name: mysql-storage
+          path: "/var/lib/mysql"
+          type: host
+          readOnly: false
+      pre:
+        - name: chown-logs-dir
+          command: "sudo /bin/chown mysql:mysql /var/log/ccp/mysql"
+        - name: chown-data-dir
+          command: "sudo /bin/chown mysql:mysql /var/lib/mysql"
+      daemon:
+        files:
+          - entrypoint
+          - mycnf
+          - check
+          - readiness
+        dependencies:
+          - etcd
+        command: /opt/ccp/bin/entrypoint.sh
+
+files:
+  entrypoint:
+    path: /opt/ccp/bin/entrypoint.sh
+    content: percona_entrypoint.sh.j2
+    perm: "0755"
+  mycnf:
+    path: /etc/mysql/my.cnf
+    content: my.cnf.j2
+  check:
+    path: /opt/ccp/bin/clustercheckcron
+    content: clustercheckcron.j2
+    perm: "0755"
+  readiness:
+    path: /opt/ccp/bin/percona_readiness.py
+    content: percona_readiness.py.j2
+    perm: "0750"
