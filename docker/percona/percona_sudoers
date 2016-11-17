@@ -1,0 +1,1 @@
+%microservices ALL=(root) NOPASSWD: /bin/chown mysql\:mysql /var/lib/mysql, /bin/chown mysql\:mysql /var/log/ccp/mysql

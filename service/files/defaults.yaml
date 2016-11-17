@@ -1,0 +1,18 @@
+configs:
+  service:
+    database: galera
+  db:
+    root_password: "password"
+    max_timeout: 60
+  percona:
+    cluster_name: "k8scluster"
+    xtrabackup_password: "password"
+    monitor_password: "password"
+    port:
+      cont: 3306
+url:
+  percona:
+    debian:
+      repo: "http://repo.percona.com/apt"
+      keyserver: "hkp://keyserver.ubuntu.com:80"
+      keyid: "9334A25F8507EFA5"
