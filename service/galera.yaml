@@ -31,6 +31,7 @@ service:
           - mycnf
           - check
           - readiness
+          - galera-etcd-register
         dependencies:
           - etcd
         command: /opt/ccp/bin/entrypoint.sh
@@ -51,3 +52,7 @@ files:
     path: /opt/ccp/bin/percona_readiness.py
     content: percona_readiness.py.j2
     perm: "0750"
+  galera-etcd-register:
+    path: /opt/ccp/bin/etcd_register.py
+    content: etcd_register.py.j2
+    perm: "0755"
