@@ -22,10 +22,8 @@ service:
       probes:
         readiness: "/opt/ccp/bin/percona_readiness.py"
         liveness:
-          path: "/"
-          type: "httpGet"
-          port: 8080
-          initialDelay: 20
+            command: "true"
+            type: "exec"
       volumes:
         - name: mysql-logs
           path: "/var/log/ccp/mysql"
@@ -46,6 +44,7 @@ service:
           - mycnf
           - check
           - readiness
+          - galera-etcd-register
         dependencies:
           - etcd
         command: /opt/ccp/bin/entrypoint.sh
@@ -69,4 +68,8 @@ files:
   galera-healthcheck-entrypoint:
     path: /opt/ccp/bin/galera-healthcheck-entrypoint.sh
     content: galera-healthcheck-entrypoint.sh.j2
+    perm: "0755"
+  galera-etcd-register:
+    path: /opt/ccp/bin/etcd_register.py
+    content: etcd_register.py.j2
     perm: "0755"
