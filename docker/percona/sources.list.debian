@@ -1,0 +1,2 @@
+# Maria DB repo
+deb [arch=amd64,i386] http://repo.percona.com/apt jessie main

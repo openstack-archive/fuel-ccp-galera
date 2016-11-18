@@ -1,0 +1,20 @@
+#!/bin/bash
+
+MONITOR_PASSWORD={{ percona.monitor_password }}
+PIDFILE=/var/run/galera-healthcheck.pid
+ipaddr=$(hostname -i | awk ' { print $1 } ')
+
+# Forward logs to docker log collector
+exec 1>/proc/1/fd/2 2>/proc/1/fd/2
+
+function shutdown() {
+  echo "Shutting down"
+  test -s ${PIDFILE} && kill -TERM $(cat ${PIDFILE})
+}
+trap shutdown TERM INT
+
+/usr/bin/galera-healthcheck -ip=${ipaddr} \
+  -port=8080 \
+  -pidfile=${PIDFILE} \
+  -user monitor \
+  -password="${MONITOR_PASSWORD}"

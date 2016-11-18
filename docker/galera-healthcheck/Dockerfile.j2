@@ -1,0 +1,11 @@
+FROM {{ namespace }}/base-tools:{{ tag }}
+MAINTAINER {{ maintainer }}
+
+COPY galera-healthcheck /usr/bin/galera-healthcheck
+
+RUN useradd --user-group -G microservices mysql \
+    && chmod a+x /usr/bin/galera-healthcheck \
+    && touch /var/run/galera-healthcheck.pid \
+    && chown mysql: /var/run/galera-healthcheck.pid
+
+USER mysql

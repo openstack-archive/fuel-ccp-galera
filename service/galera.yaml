@@ -4,13 +4,28 @@ service:
   ports:
     - {{ percona.port }}
   containers:
+    - name: galera-healthcheck
+      image: galera-healthcheck
+      probes:
+        readiness: "true"
+        liveness:
+          command: "true"
+          type: "exec"
+      daemon:
+        files:
+          - galera-healthcheck-entrypoint
+        dependencies:
+          - etcd
+        command: /opt/ccp/bin/galera-healthcheck-entrypoint.sh
     - name: galera
       image: percona
       probes:
         readiness: "/opt/ccp/bin/percona_readiness.py"
         liveness:
-          command: "true"
-          type: "exec"
+          path: "/"
+          type: "httpGet"
+          port: 8080
+          initialDelay: 40
       volumes:
         - name: mysql-logs
           path: "/var/log/ccp/mysql"
@@ -55,4 +70,8 @@ files:
   galera-etcd-register:
     path: /opt/ccp/bin/etcd_register.py
     content: etcd_register.py.j2
+    perm: "0755"
+  galera-healthcheck-entrypoint:
+    path: /opt/ccp/bin/galera-healthcheck-entrypoint.sh
+    content: galera-healthcheck-entrypoint.sh.j2
     perm: "0755"
