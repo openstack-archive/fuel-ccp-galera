@@ -5,7 +5,6 @@ set -ex
 exec 1>/proc/1/fd/2 2>/proc/1/fd/2
 
 MYSQL_ROOT_PASSWORD={{ db.root_password }}
-DISCOVERY_SERVICE={{ address("etcd", etcd.client_port) }}
 CLUSTER_NAME={{ percona.cluster_name }}
 XTRABACKUP_PASSWORD={{ percona.xtrabackup_password }}
 MONITOR_PASSWORD={{ percona.monitor_password }}
@@ -109,49 +108,8 @@ EOSQL
 fi
 touch $DATADIR/init.ok
 
-if [ -z "$DISCOVERY_SERVICE" ]; then
-         cluster_join=$CLUSTER_JOIN
-else
-
-echo
-echo 'Registering in the discovery service'
-echo
-
-function join { local IFS="$1"; shift; echo "$*"; }
-
-# Read the list of registered IP addresses
-ipaddr=$(hostname -i | awk ' { print $1 } ')
-hostname=$(hostname)
-
-$CURL http://$DISCOVERY_SERVICE/v2/keys/pxc-cluster/queue/$CLUSTER_NAME -XPOST -d value=$ipaddr -d ttl=60
-
-#get list of IP from queue
-i=( $($CURL http://$DISCOVERY_SERVICE/v2/keys/pxc-cluster/queue/$CLUSTER_NAME | jq -r '.node.nodes[].value') )
-
-# this remove my ip from the list
-i1=${i[@]/$ipaddr}
-
-# Register the current IP in the discovery service
-
-# key set to expire in 40 sec. There is a cronjob that should update them regularly
-$CURL http://$DISCOVERY_SERVICE/v2/keys/pxc-cluster/$CLUSTER_NAME/$ipaddr/ipaddr -XPUT -d value="$ipaddr" -d ttl=40
-$CURL http://$DISCOVERY_SERVICE/v2/keys/pxc-cluster/$CLUSTER_NAME/$ipaddr/hostname -XPUT -d value="$hostname" -d ttl=40
-$CURL http://$DISCOVERY_SERVICE/v2/keys/pxc-cluster/$CLUSTER_NAME/$ipaddr -XPUT -d ttl=40 -d dir=true -d prevExist=true
-
-i=( $($CURL http://$DISCOVERY_SERVICE/v2/keys/pxc-cluster/$CLUSTER_NAME/?quorum=true | jq -r '.node.nodes[]?.key' | awk -F'/' '{print $(NF)}') )
-# this remove my ip from the list
-i2=${i[@]/$ipaddr}
-
-# Combine to arrays and remove duplicates
-OLDIFS="$IFS"
-IFS=$'\n'
-combined=(`for R in "${i1[@]}" "${i2[@]}" ; do echo "$R" ; done | sort -du`)
-IFS="$OLDIFS"
-
-cluster_join=$(join , $combined )
+cluster_join=$(/opt/ccp/bin/etcd_register.py)
 echo "Joining cluster $cluster_join"
-
-fi
 
 mysqld --user=mysql --wsrep_cluster_name=$CLUSTER_NAME \
        --wsrep_cluster_address="gcomm://$cluster_join" \
