@@ -1,0 +1,170 @@
+#!/usr/bin/env python
+
+import argparse
+import functools
+import logging
+import os
+import socket
+import sys
+import time
+
+import etcd
+import pymysql.cursors
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--allow_desynced", dest='allow_desynced', action='store_true')
+args = parser.parse_args()
+
+# Galera states
+JOINING_STATE = 1
+DONOR_DESYNCED_STATE = 2
+JOINED_STATE = 3
+SYNCED_STATE = 4
+WAS_JOINED = False
+OLD_STATE = 0
+
+LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
+LOG_FORMAT = "%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s"
+logging.basicConfig(format=LOG_FORMAT, datefmt=LOG_DATEFMT)
+LOG = logging.getLogger(__name__)
+LOG.setLevel(logging.DEBUG)
+
+CONNECTION_ATTEMPTS = 3
+CONNECTION_DELAY = 5
+FIRST_RUN = True
+ETCD_PATH = "/pxc-cluster/{{ percona.cluster_name }}"
+HOSTNAME = socket.getfqdn()
+IPADDR = socket.gethostbyname(HOSTNAME)
+
+
+def retry(f):
+    @functools.wraps(f)
+    def wrap(*args, **kwargs):
+        attempts = CONNECTION_ATTEMPTS
+        delay = CONNECTION_DELAY
+        while attempts > 1:
+            try:
+                return f(*args, **kwargs)
+            except etcd.EtcdException as e:
+                LOG.warning('Etcd is not ready: %s', str(e))
+                LOG.warning('Retrying in %d seconds...', delay)
+                time.sleep(delay)
+                attempts -= 1
+        return f(*args, **kwargs)
+    return wrap
+
+
+def get_etcd_client():
+
+    return etcd.Client(host="{{ address("etcd") }}",
+                       port={{ etcd.client_port.cont }},
+                       allow_reconnect=True,
+                       read_timeout=2)
+
+
+def get_mysql_client():
+    return pymysql.connect(host='127.0.0.1',
+                           port=3306,
+                           user='monitor',
+                           password='{{ percona.monitor_password }}',
+                           connect_timeout=1,
+                           read_timeout=1,
+                           cursorclass=pymysql.cursors.DictCursor)
+
+
+def fetch_mysql_data(mysql_client):
+
+    with mysql_client.cursor() as cursor:
+        sql = "SHOW STATUS LIKE 'wsrep%'"
+        cursor.execute(sql)
+        data = cursor.fetchall()
+        return data
+
+
+def check_galera_state(mysql_client, etcd_client, ttl):
+
+    wsrep_data = {}
+    status = 'Unknown'
+    joined = False
+
+    data = fetch_mysql_data(mysql_client)
+    for i in data:
+        wsrep_data[i['Variable_name']] = i['Value']
+
+    state = int(wsrep_data['wsrep_local_state'])
+    state_comment = wsrep_data['wsrep_local_state_comment']
+
+    if state == SYNCED_STATE:
+        WAS_JOINED = True
+        OLD_STATE = SYNCED_STATE
+        LOG.info("State OK: %s", state_comment)
+        _etcd_update(etcd_client, ttl)
+    elif state == DONOR_DESYNCED_STATE and args.allow_desynced:
+        state = wsrep_data['wsrep_local_state_comment']
+        WAS_JOINED = True
+        OLD_STATE = DONOR_DESYNCED_STATE
+        LOG.info("State OK: %s", state_comment)
+        _etcd_update(etcd_client, ttl)
+    elif state == JOINED_STATE and WAS_JOINED:
+        if OLD_STATE == JOINED_STATE:
+            LOG.info("State BAD: %s", state_comment)
+            LOG.info("Joined, but not syncyng")
+            _etcd_delete(etcd_client)
+            #500
+            WAS_JOINED = True
+            OLD_STATE = JOINED_STATE
+        else:
+            LOG.info("State OK: %s", state_comment)
+            LOG.info("Probably will sync soon")
+            OLD_STATE = JOINED_STATE
+            _etcd_update(etcd_client, ttl)
+    else:
+        LOG.info("State OK: %s", state_comment)
+        LOG.info("Just joined")
+        WAS_JOINED = True
+        OLD_STATE = JOINED_STATE
+        _etcd_update(etcd_client, ttl)
+
+
+@retry
+def _etcd_delete(etcd_client):
+
+    # Add locking before delete operation. Possible race.
+    key = os.path.join(ETCD_PATH, IPADDR)
+    #etcd_client.delete(key, recursive=True, dir=True)
+    LOG.warning("NOOP: Deleted node's key '%s'", key)
+
+
+@retry
+def _etcd_update(etcd_client, ttl):
+
+    for key in ['', 'ctime', 'ipaddr', 'hostname']:
+        full_key = os.path.join(ETCD_PATH, IPADDR, key)
+        isdir = False if key else True
+        try:
+            etcd_client.write(full_key, None, ttl=ttl,
+                              dir=isdir, prevExist=True)
+            LOG.info("Set ttl for '%s' to %s", full_key, ttl)
+        except etcd.EtcdKeyNotFound:
+            # Probably we should fail here
+            LOG.info("Cant find the '%s' key", full_key)
+
+
+if __name__ == "__main__":
+
+    while True:
+        if FIRST_RUN:
+            LOG.info("First run detected, sleeping for 40 sec")
+            time.sleep(40)
+            FIRST_RUN = False
+        try:
+            mysql_client = get_mysql_client()
+            etcd_client = get_etcd_client()
+            check_galera_state(mysql_client, etcd_client, ttl=30)
+        except Exception as err:
+            LOG.exception(err)
+            etcd_client = get_etcd_client()
+            _etcd_delete(etcd_client)
+            #500
+        LOG.info("Sleeping for 5 sec")
+        time.sleep(5)

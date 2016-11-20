@@ -115,8 +115,6 @@ else
     echo "Joining to nodes: $available_nodes"
 fi
 
-bash /opt/ccp/bin/clustercheckcron 1 1 &
-
 mysqld --user=mysql --wsrep_cluster_name=$CLUSTER_NAME \
        --wsrep_cluster_address="gcomm://$available_nodes" \
        --wsrep_sst_method=xtrabackup-v2 \
