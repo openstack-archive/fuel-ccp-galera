@@ -85,7 +85,6 @@ def _etcd_create_dir(etcd_client, ttl):
 @retry
 def set_status(etcd_client, ttl=30):
 
-    etcd_client = get_etcd_client()
     _etcd_create_dir(etcd_client, ttl)
     _etcd_set(etcd_client, ('ctime', time.time()), ttl)
     _etcd_set(etcd_client, ('ipaddr', IPADDR), ttl)

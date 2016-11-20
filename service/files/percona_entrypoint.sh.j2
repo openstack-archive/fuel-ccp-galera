@@ -70,8 +70,8 @@ if [ ! -e "$DATADIR/init.ok" ]; then
                CREATE USER 'xtrabackup'@'localhost' IDENTIFIED BY '$XTRABACKUP_PASSWORD';
                GRANT RELOAD,PROCESS,LOCK TABLES,REPLICATION CLIENT ON *.* TO 'xtrabackup'@'localhost';
                GRANT REPLICATION CLIENT ON *.* TO monitor@'%' IDENTIFIED BY '$MONITOR_PASSWORD';
-               DROP DATABASE IF EXISTS test ;
-               FLUSH PRIVILEGES ;
+               DROP DATABASE IF EXISTS test;
+               FLUSH PRIVILEGES;
 EOSQL
          if [ ! -z "$MYSQL_ROOT_PASSWORD" ]; then
                 mysql+=( -p"${MYSQL_ROOT_PASSWORD}" )
