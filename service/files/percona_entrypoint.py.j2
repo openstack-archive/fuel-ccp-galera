@@ -1,0 +1,242 @@
+#!/usr/bin/env python
+
+import argparse
+import functools
+import logging
+import os
+import os.path
+import socket
+import sys
+import shutil
+import subprocess
+import time
+
+import etcd
+import pymysql.cursors
+
+MYSQL_ROOT_PASSWORD = "{{ db.root_password }}"
+CLUSTER_NAME = "{{ percona.cluster_name }}"
+XTRABACKUP_PASSWORD = "{{ percona.xtrabackup_password }}"
+MONITOR_PASSWORD = "{{ percona.monitor_password }}"
+DATADIR = "/var/lib/mysql"
+INIT_FILE = DATADIR + '/init.ok'
+
+LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
+LOG_FORMAT = "%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s"
+logging.basicConfig(format=LOG_FORMAT, datefmt=LOG_DATEFMT)
+LOG = logging.getLogger(__name__)
+LOG.setLevel(logging.DEBUG)
+
+CONNECTION_ATTEMPTS = 3
+CONNECTION_DELAY = 5
+ETCD_PATH = "/pxc-cluster/{{ percona.cluster_name }}"
+HOSTNAME = socket.getfqdn()
+IPADDR = socket.gethostbyname(HOSTNAME)
+
+def retry(f):
+    @functools.wraps(f)
+    def wrap(*args, **kwargs):
+        attempts = CONNECTION_ATTEMPTS
+        delay = CONNECTION_DELAY
+        while attempts > 1:
+            try:
+                return f(*args, **kwargs)
+            except etcd.EtcdException as e:
+                LOG.warning('Etcd is not ready: %s', str(e))
+                LOG.warning('Retrying in %d seconds...', delay)
+                time.sleep(delay)
+                attempts -= 1
+        return f(*args, **kwargs)
+    return wrap
+
+
+def get_mysql_client():
+    return pymysql.connect(unix_socket='/var/run/mysqld/mysqld.sock',
+                           user='root',
+                           connect_timeout=1,
+                           read_timeout=1,
+                           cursorclass=pymysql.cursors.DictCursor)
+
+
+def get_etcd_client():
+
+    return etcd.Client(host="{{ address("etcd") }}",
+                       port={{ etcd.client_port.cont }},
+                       allow_reconnect=True,
+                       read_timeout=2)
+
+
+def datadir_cleanup(path):
+
+    for root, dirs, files in os.walk(path, topdown=False):
+        for f in files:
+            to_delete = os.path.join(root, f)
+            os.remove(to_delete)
+        for dir in dirs:
+            shutil.rmtree(os.path.join(root, dir))
+
+
+def execute_cmd(cmd):
+
+    LOG.debug("Executing cmd:\n%s", (str(cmd)))
+    kwargs = {
+        "shell": True,
+        "stdin": sys.stdin,
+        "stdout": sys.stdout,
+        "stderr": sys.stderr}
+    return subprocess.Popen(str(cmd), **kwargs)
+
+def run_cmd(cmd, wait=True, job=True):
+
+    proc = execute_cmd(cmd)
+    if wait:
+        proc.communicate()
+        if job and proc.returncode != 0:
+            raise ProcessException(proc.returncode)
+
+
+def mysql_exec(mysql_client, sql_list):
+
+    with mysql_client.cursor() as cursor:
+        for sql in sql_list:
+            LOG.debug("Executing mysql cmd:\n%s", (sql))
+            cursor.execute(sql)
+
+
+@retry
+def fetch_status(etcd_client):
+
+    key = ETCD_PATH
+    result = [str(i.key).replace(key + "/", '')
+              for i in etcd_client.read(key).leaves
+              if str(i.key) != key]
+    LOG.info("Current cluster state is: %s", result)
+    return result
+
+
+def _etcd_set(etcd_client, data, ttl):
+
+    key = os.path.join(ETCD_PATH, IPADDR, data[0])
+    etcd_client.set(key, data[1], ttl=ttl)
+    LOG.info("Set %s with value '%s'", key, data[1])
+
+
+def _etcd_create_dir(etcd_client, ttl):
+
+    key = os.path.join(ETCD_PATH, IPADDR)
+    try:
+        etcd_client.get(key)
+        LOG.warning("Found stale key '%s', deleting", key)
+        etcd_client.delete(key, recursive=True, dir=True)
+        etcd_client.write(os.path.join(ETCD_PATH, IPADDR), None, ttl=ttl,
+                          dir=True)
+        LOG.info("Set ttl for '%s' directory to %s", key, ttl)
+    except etcd.EtcdKeyNotFound:
+        etcd_client.write(os.path.join(ETCD_PATH, IPADDR), None, ttl=ttl,
+                          dir=True)
+        LOG.info("Set ttl for '%s' directory to %s", key, ttl)
+
+
+@retry
+def set_status(etcd_client, ttl=30):
+
+    _etcd_create_dir(etcd_client, ttl)
+    _etcd_set(etcd_client, ('ctime', time.time()), ttl)
+    _etcd_set(etcd_client, ('ipaddr', IPADDR), ttl)
+    _etcd_set(etcd_client, ('hostname', HOSTNAME), ttl)
+
+
+def create_join_list(status):
+
+    status.remove(IPADDR)
+    if not status:
+        return ""
+    else:
+        return ','.join(status)
+
+
+def mysql_init():
+    LOG.info("Init file '%s' not found, doing full init", INIT_FILE)
+    datadir_cleanup(DATADIR)
+    run_cmd("mysqld --initialize-insecure")
+    run_cmd("mysqld --skip-networking", wait=False)
+
+    LOG.info("Waiting mysql to start...")
+    time.sleep(3)
+    mysql_alive = False
+    for i in range(0,30):
+        try:
+            mysql_client = get_mysql_client()
+            mysql_exec(mysql_client, ['SELECT 1'])
+            mysql_alive = True
+            break
+        except Exception as err:
+            time.sleep(1)
+
+    if mysql_alive:
+        LOG.info("Mysql is running, setting up the permissions")
+        sql_list = ["SET sql_log_bin = 0",
+                    "CREATE USER 'root'@'%%' IDENTIFIED BY '%s'" % MYSQL_ROOT_PASSWORD,
+                    "GRANT ALL ON *.* TO 'root'@'%' WITH GRANT OPTION",
+                    "ALTER USER 'root'@'localhost' IDENTIFIED BY '%s'" % MYSQL_ROOT_PASSWORD,
+                    "CREATE USER 'xtrabackup'@'localhost' IDENTIFIED BY '%s'" % XTRABACKUP_PASSWORD,
+                    "GRANT RELOAD,PROCESS,LOCK TABLES,REPLICATION CLIENT ON *.* TO 'xtrabackup'@'localhost'",
+                    "GRANT REPLICATION CLIENT ON *.* TO monitor@'%%' IDENTIFIED BY '%s'" % MONITOR_PASSWORD,
+                    "DROP DATABASE IF EXISTS test",
+                    "FLUSH PRIVILEGES",
+                    "SET sql_log_bin = 1"]
+        try:
+            mysql_exec(mysql_client, sql_list)
+        except Exception as err:
+            LOG.exception(err)
+    else:
+        LOG.info("Mysql boot failed")
+        sys.exit(1)
+
+    run_cmd("pkill mysqld")
+    open(INIT_FILE, 'a').close()
+    LOG.info("Mysql bootstraping is done")
+
+
+def main(ttl):
+
+    if not os.path.isfile(INIT_FILE):
+        mysql_init()
+    try:
+        etcd_client = get_etcd_client()
+        lock = etcd.Lock(etcd_client, 'galera_bootstrap')
+        LOG.info("Locking...")
+        lock.acquire(blocking=True, lock_ttl=ttl)
+        LOG.info("Successfuly acquired lock")
+        set_status(etcd_client, ttl)
+        status = fetch_status(etcd_client)
+        available_nodes = (create_join_list(status))
+        if available_nodes:
+            LOG.info("Joining to nodes: %s", available_nodes)
+        else:
+            LOG.info("No available nodes found. Assuming Im first")
+
+        lock.release()
+        LOG.info("Successfuly released lock")
+        # Possible race?
+        run_cmd("mysqld --user=mysql --wsrep_cluster_name='%s' \
+                --wsrep_cluster_address='gcomm://%s' \
+                --wsrep_sst_method=xtrabackup-v2 \
+                --wsrep_sst_auth='xtrabackup:%s' \
+                --wsrep_node_address='%s' \
+                --pxc_strict_mode=PERMISSIVE" % 
+                (CLUSTER_NAME, available_nodes, XTRABACKUP_PASSWORD, IPADDR),
+                job=False)
+    except Exception as err:
+        LOG.exception(err)
+    finally:
+        lock.release()
+        LOG.info("Successfuly released lock")
+
+if __name__ == "__main__":
+    main(ttl=60)
+
+# vim: set ts=4 sw=4 tw=0 et :
+# TODO(TZINFO)
+#         # sed is for https://bugs.mysql.com/bug.php?id=20545
+#         mysql_tzinfo_to_sql /usr/share/zoneinfo | sed 's/Local time zone must be set--see zic manual page/FCTY/' | "${mysql[@]}" mysql

@@ -42,20 +42,16 @@ service:
           - galera-etcd-register
         dependencies:
           - etcd
-        command: /opt/ccp/bin/entrypoint.sh
+        command: /opt/ccp/bin/entrypoint.py
 
 files:
   entrypoint:
-    path: /opt/ccp/bin/entrypoint.sh
-    content: percona_entrypoint.sh.j2
+    path: /opt/ccp/bin/entrypoint.py
+    content: percona_entrypoint.py.j2
     perm: "0755"
   mycnf:
     path: /etc/mysql/my.cnf
     content: my.cnf.j2
-  check:
-    path: /opt/ccp/bin/clustercheckcron
-    content: clustercheckcron.j2
-    perm: "0755"
   readiness:
     path: /opt/ccp/bin/percona_readiness.py
     content: percona_readiness.py.j2
