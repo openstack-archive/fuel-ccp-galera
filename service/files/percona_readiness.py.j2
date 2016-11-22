@@ -1,44 +1,104 @@
 #!/usr/bin/env python
 
+import functools
+import os.path
 import sys
+import time
 
+import etcd
 import pymysql.cursors
 
-connection = pymysql.connect(host='127.0.0.1',
-                             port=3306,
-                             user='monitor',
-                             password='{{ percona.monitor_password }}',
-                             connect_timeout=1,
-                             read_timeout=1,
-                             cursorclass=pymysql.cursors.DictCursor)
+CONNECTION_ATTEMPTS = 3
+CONNECTION_DELAY = 5
+ETCD_PATH = "/galera/{{ percona.cluster_name }}"
 
 
-def fetch_data(connection):
+def retry(f):
+    @functools.wraps(f)
+    def wrap(*args, **kwargs):
+        attempts = CONNECTION_ATTEMPTS
+        delay = CONNECTION_DELAY
+        while attempts > 1:
+            try:
+                return f(*args, **kwargs)
+            except etcd.EtcdException as e:
+                time.sleep(delay)
+                attempts -= 1
+        return f(*args, **kwargs)
+    return wrap
 
+
+def get_mysql_client():
+
+    return pymysql.connect(host='127.0.0.1',
+                           port=3306,
+                           user='monitor',
+                           password='{{ percona.monitor_password }}',
+                           connect_timeout=1,
+                           read_timeout=1,
+                           cursorclass=pymysql.cursors.DictCursor)
+
+
+def get_etcd_client():
+
+    return etcd.Client(host="{{ address("etcd") }}",
+                       port={{ etcd.client_port.cont }},
+                       allow_reconnect=True,
+                       read_timeout=2)
+
+
+def _etcd_read(etcd_client, path):
+
+    key = os.path.join(ETCD_PATH, path)
+    return etcd_client.read(key).value
+
+
+@retry
+def check_cluster_state():
+
+    etcd_client = get_etcd_client()
+    state = _etcd_read(etcd_client, 'state')
+    if state != 'STEADY':
+        sys.exit(1)
+
+@retry
+def get_cluster_uuid():
+
+    etcd_client = get_etcd_client()
+    return _etcd_read(etcd_client, 'uuid')
+
+
+def fetch_wsrep_data():
+
+    data = {}
     try:
-        with connection.cursor() as cursor:
+        mysql_client = get_mysql_client()
+        with mysql_client.cursor() as cursor:
             sql = "SHOW STATUS LIKE 'wsrep%'"
             cursor.execute(sql)
-            data = cursor.fetchall()
+            for i in cursor.fetchall():
+                data[i['Variable_name']] = i['Value']
             return data
     except Exception:
         sys.exit(1)
 
 
-def check_galera(connection):
+def check_galera():
 
     results = {}
-    data = fetch_data(connection)
-    for i in data:
-        results[i['Variable_name']] = i['Value']
+    wsrep_data = fetch_wsrep_data()
+    uuid = get_cluster_uuid()
 
-    if (results["wsrep_local_state_comment"] != "Synced" or
-            results["wsrep_evs_state"] != "OPERATIONAL" or
-            results["wsrep_connected"] != "ON" or
-            results["wsrep_ready"] != "ON"):
+    if (wsrep_data["wsrep_local_state_comment"] != "Synced" or
+            wsrep_data["wsrep_evs_state"] != "OPERATIONAL" or
+            wsrep_data["wsrep_connected"] != "ON" or
+            wsrep_data["wsrep_ready"] != "ON" or
+            wsrep_data["wsrep_cluster_state_uuid"] != uuid):
 
         sys.exit(1)
     else:
         sys.exit(0)
 
-check_galera(connection)
+if __name__ == "__main__":
+    check_cluster_state()
+    check_galera()

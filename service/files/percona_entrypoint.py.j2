@@ -20,6 +20,7 @@ XTRABACKUP_PASSWORD = "{{ percona.xtrabackup_password }}"
 MONITOR_PASSWORD = "{{ percona.monitor_password }}"
 DATADIR = "/var/lib/mysql"
 INIT_FILE = DATADIR + '/init.ok'
+EXPECTED_NODES = 3
 
 LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
 LOG_FORMAT = "%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s"
@@ -29,9 +30,17 @@ LOG.setLevel(logging.DEBUG)
 
 CONNECTION_ATTEMPTS = 3
 CONNECTION_DELAY = 5
-ETCD_PATH = "/pxc-cluster/{{ percona.cluster_name }}"
+ETCD_PATH = "/galera/{{ percona.cluster_name }}"
 HOSTNAME = socket.getfqdn()
 IPADDR = socket.gethostbyname(HOSTNAME)
+
+
+class ProcessException(Exception):
+    def __init__(self, exit_code):
+        self.exit_code = exit_code
+        self.msg = "Command exited with code %d" % self.exit_code
+        super(ProcessException, self).__init__(self.msg)
+
 
 def retry(f):
     @functools.wraps(f)
@@ -50,12 +59,21 @@ def retry(f):
     return wrap
 
 
-def get_mysql_client():
-    return pymysql.connect(unix_socket='/var/run/mysqld/mysqld.sock',
-                           user='root',
-                           connect_timeout=1,
-                           read_timeout=1,
-                           cursorclass=pymysql.cursors.DictCursor)
+def get_mysql_client(insecure=False):
+
+    if insecure:
+        return pymysql.connect(unix_socket='/var/run/mysqld/mysqld.sock',
+                               user='root',
+                               connect_timeout=1,
+                               read_timeout=1,
+                               cursorclass=pymysql.cursors.DictCursor)
+    else:
+        return pymysql.connect(host='localhost',
+                               user='root',
+                               password=MYSQL_ROOT_PASSWORD,
+                               connect_timeout=1,
+                               read_timeout=1,
+                               cursorclass=pymysql.cursors.DictCursor)
 
 
 def get_etcd_client():
@@ -95,64 +113,188 @@ def run_cmd(cmd, wait=True, job=True):
             raise ProcessException(proc.returncode)
 
 
+def run_mysqld(available_nodes):
+
+    proc = execute_cmd("mysqld --user=mysql --wsrep_cluster_name='%s'"
+                       " --wsrep_cluster_address='gcomm://%s'"
+                       " --wsrep_sst_method=xtrabackup-v2"
+                       " --wsrep_sst_auth='xtrabackup:%s'"
+                       " --wsrep_node_address='%s'"
+                       " --pxc_strict_mode=PERMISSIVE" %
+                       (CLUSTER_NAME, available_nodes,
+                        XTRABACKUP_PASSWORD, IPADDR))
+    time.sleep(5)
+    if proc.poll() is None:
+        LOG.info("Mysqld is started")
+        return proc
+    proc.communicate()
+    raise RuntimeError("Process exited with code: %d" % proc.returncode)
+
 def mysql_exec(mysql_client, sql_list):
 
     with mysql_client.cursor() as cursor:
         for sql in sql_list:
             LOG.debug("Executing mysql cmd:\n%s", (sql))
             cursor.execute(sql)
+        return cursor.fetchall()
 
 
 @retry
-def fetch_status(etcd_client):
+def fetch_status(etcd_client, path):
 
-    key = ETCD_PATH
-    result = [str(i.key).replace(key + "/", '')
-              for i in etcd_client.read(key).leaves
-              if str(i.key) != key]
-    LOG.info("Current cluster state is: %s", result)
-    return result
+    key = os.path.join(ETCD_PATH, path)
+    try:
+        root = etcd_client.get(key)
+        result = [str(child.key).replace(key + "/", '')
+                  for child in root.children
+                  if str(child.key) != key]
+        LOG.info("Current nodes in %s is: %s", key, result)
+        return result
+    except etcd.EtcdKeyNotFound:
+        LOG.info("Current nodes in %s is: %s", key, None)
+        return []
+
+
+
+def fetch_wsrep_data():
+
+    wsrep_data = {}
+    mysql_client = get_mysql_client()
+    data = mysql_exec(mysql_client, ["SHOW STATUS LIKE 'wsrep%'"])
+    for i in data:
+        wsrep_data[i['Variable_name']] = i['Value']
+    return wsrep_data
+
+
+@retry
+def get_oldest_node(etcd_client, path):
+
+    key = os.path.join(ETCD_PATH, path)
+    root = etcd_client.get(key)
+    result = [(str(child.key).replace(key + "/", ''), float(child.value))
+              for child in root.children]
+    result.sort(key=lambda x: x[1])
+    LOG.info("Oldest node is %s, am %s", result[0][0], IPADDR)
+    return result[0][0]
 
 
 def _etcd_set(etcd_client, data, ttl):
 
-    key = os.path.join(ETCD_PATH, IPADDR, data[0])
+    key = os.path.join(ETCD_PATH, data[0])
     etcd_client.set(key, data[1], ttl=ttl)
     LOG.info("Set %s with value '%s'", key, data[1])
 
 
-def _etcd_create_dir(etcd_client, ttl):
-
-    key = os.path.join(ETCD_PATH, IPADDR)
-    try:
-        etcd_client.get(key)
-        LOG.warning("Found stale key '%s', deleting", key)
-        etcd_client.delete(key, recursive=True, dir=True)
-        etcd_client.write(os.path.join(ETCD_PATH, IPADDR), None, ttl=ttl,
-                          dir=True)
-        LOG.info("Set ttl for '%s' directory to %s", key, ttl)
-    except etcd.EtcdKeyNotFound:
-        etcd_client.write(os.path.join(ETCD_PATH, IPADDR), None, ttl=ttl,
-                          dir=True)
-        LOG.info("Set ttl for '%s' directory to %s", key, ttl)
-
-
 @retry
-def set_status(etcd_client, ttl=30):
+def etcd_register_in_path(etcd_client, path, ttl=60):
 
-    _etcd_create_dir(etcd_client, ttl)
-    _etcd_set(etcd_client, ('ctime', time.time()), ttl)
-    _etcd_set(etcd_client, ('ipaddr', IPADDR), ttl)
-    _etcd_set(etcd_client, ('hostname', HOSTNAME), ttl)
+    key = os.path.join(path, IPADDR)
+    _etcd_set(etcd_client, (key, time.time()), ttl)
 
+
+def etcd_deregister_in_path(etcd_client, path):
+
+    key = os.path.join(ETCD_PATH, path, IPADDR)
+    try:
+        etcd_client.delete(key, recursive=True)
+        LOG.warning("Deleted key %s", key)
+    except etcd.EtcdKeyNotFound:
+        LOG.warning("Key %s not exist", key)
+
+
+def is_cluster_running(etcd_client):
+
+
+    key = os.path.join(ETCD_PATH, 'state')
+    try:
+        state = etcd_client.read(key).value
+        return True if state == 'STEADY' else False
+    except etcd.EtcdKeyNotFound:
+        return False
+
+
+def wait_for_expected_state(etcd_client, ttl):
+
+    while True:
+        status = fetch_status(etcd_client, 'queue')
+        if len(status) != EXPECTED_NODES:
+            LOG.debug("Current number of nodes is %s, expected: %s, sleeping",
+                      len(status), EXPECTED_NODES)
+            time.sleep(1)
+        else:
+            wait_for_my_turn(etcd_client)
+            break
+
+
+def wait_for_my_turn(etcd_client):
+
+    LOG.info("Waiting for my turn to join cluster")
+    while True:
+        oldest_node = get_oldest_node(etcd_client, 'queue')
+        if IPADDR == oldest_node:
+            LOG.info("It's my turn to join the cluster")
+            return
+        else:
+            time.sleep(5)
+
+
+def wait_for_sync():
+
+    while True:
+        try:
+            wsrep_data = fetch_wsrep_data()
+            state = int(wsrep_data['wsrep_local_state'])
+            if state == 4:
+                LOG.info("Node synced")
+                break
+            else:
+                LOG.debug("Waiting node to be synced. Current state is: %s",
+                          wsrep_data['wsrep_local_state_comment'])
+                time.sleep(5)
+        except Exception:
+            time.sleep(5)
+
+
+def check_if_im_last(etcd_client):
+
+    queue_status = fetch_status(etcd_client, 'queue')
+    nodes_status = fetch_status(etcd_client, 'nodes')
+    if not queue_status and len(nodes_status) == EXPECTED_NODES:
+        LOG.info("Looks like this node is the last one")
+        return True
+    else:
+        LOG.info("I'm not the last node")
+        return False
 
 def create_join_list(status):
 
-    status.remove(IPADDR)
+    if IPADDR in status:
+        status.remove(IPADDR)
     if not status:
+        LOG.info("No available nodes found. Assuming I'm first")
         return ""
     else:
+        LOG.info("Joining to nodes %s", ','.join(status))
         return ','.join(status)
+
+
+def update_uuid(etcd_client):
+
+    wsrep_data = fetch_wsrep_data()
+    uuid = wsrep_data['wsrep_cluster_state_uuid']
+    _etcd_set(etcd_client, ('uuid', uuid), ttl=None)
+
+
+def update_cluster_state(etcd_client, state):
+
+    _etcd_set(etcd_client, ('state', state), ttl=None)
+
+
+def wait_for_mysqld(proc):
+
+    code = proc.wait()
+    LOG.info("Process exited with code %d", code)
+    sys.exit(code)
 
 
 def mysql_init():
@@ -166,7 +308,7 @@ def mysql_init():
     mysql_alive = False
     for i in range(0,30):
         try:
-            mysql_client = get_mysql_client()
+            mysql_client = get_mysql_client(insecure=True)
             mysql_exec(mysql_client, ['SELECT 1'])
             mysql_alive = True
             break
@@ -175,16 +317,14 @@ def mysql_init():
 
     if mysql_alive:
         LOG.info("Mysql is running, setting up the permissions")
-        sql_list = ["SET sql_log_bin = 0",
-                    "CREATE USER 'root'@'%%' IDENTIFIED BY '%s'" % MYSQL_ROOT_PASSWORD,
+        sql_list = ["CREATE USER 'root'@'%%' IDENTIFIED BY '%s'" % MYSQL_ROOT_PASSWORD,
                     "GRANT ALL ON *.* TO 'root'@'%' WITH GRANT OPTION",
                     "ALTER USER 'root'@'localhost' IDENTIFIED BY '%s'" % MYSQL_ROOT_PASSWORD,
                     "CREATE USER 'xtrabackup'@'localhost' IDENTIFIED BY '%s'" % XTRABACKUP_PASSWORD,
                     "GRANT RELOAD,PROCESS,LOCK TABLES,REPLICATION CLIENT ON *.* TO 'xtrabackup'@'localhost'",
                     "GRANT REPLICATION CLIENT ON *.* TO monitor@'%%' IDENTIFIED BY '%s'" % MONITOR_PASSWORD,
                     "DROP DATABASE IF EXISTS test",
-                    "FLUSH PRIVILEGES",
-                    "SET sql_log_bin = 1"]
+                    "FLUSH PRIVILEGES"]
         try:
             mysql_exec(mysql_client, sql_list)
         except Exception as err:
@@ -194,6 +334,7 @@ def mysql_init():
         sys.exit(1)
 
     run_cmd("pkill mysqld")
+    time.sleep(5)
     open(INIT_FILE, 'a').close()
     LOG.info("Mysql bootstraping is done")
 
@@ -208,33 +349,51 @@ def main(ttl):
         LOG.info("Locking...")
         lock.acquire(blocking=True, lock_ttl=ttl)
         LOG.info("Successfuly acquired lock")
-        set_status(etcd_client, ttl)
-        status = fetch_status(etcd_client)
-        available_nodes = (create_join_list(status))
-        if available_nodes:
-            LOG.info("Joining to nodes: %s", available_nodes)
-        else:
-            LOG.info("No available nodes found. Assuming Im first")
 
-        lock.release()
-        LOG.info("Successfuly released lock")
-        # Possible race?
-        run_cmd("mysqld --user=mysql --wsrep_cluster_name='%s' \
-                --wsrep_cluster_address='gcomm://%s' \
-                --wsrep_sst_method=xtrabackup-v2 \
-                --wsrep_sst_auth='xtrabackup:%s' \
-                --wsrep_node_address='%s' \
-                --pxc_strict_mode=PERMISSIVE" %
-                (CLUSTER_NAME, available_nodes, XTRABACKUP_PASSWORD, IPADDR),
-                job=False)
+        if not is_cluster_running(etcd_client):
+            inception = True
+            LOG.info("No running cluster detected - starting bootstrap")
+
+            LOG.info("Step 1 - Queue")
+            etcd_register_in_path(etcd_client,'queue', ttl)
+            lock.release()
+            LOG.info("Successfuly released lock")
+            wait_for_expected_state(etcd_client, ttl)
+
+            LOG.info("Step 2 - Joining the cluster")
+            LOG.info("Locking...")
+            lock.acquire(blocking=True, lock_ttl=ttl)
+            LOG.info("Successfuly acquired lock")
+            nodes_status = fetch_status(etcd_client, 'nodes')
+            if nodes_status:
+                inception = False
+            available_nodes = create_join_list(nodes_status)
+            mysqld = run_mysqld(available_nodes)
+            wait_for_sync()
+            etcd_register_in_path(etcd_client, 'nodes', ttl)
+            etcd_deregister_in_path(etcd_client, 'queue')
+            last = check_if_im_last(etcd_client)
+            lock.release()
+            LOG.info("Successfuly released lock")
+
+            LOG.info("Step 3 - Update cluster metadata")
+            if inception:
+                update_uuid(etcd_client)
+                update_cluster_state(etcd_client, 'BUILDING')
+            if last:
+                update_cluster_state(etcd_client, 'STEADY')
+            LOG.info("Bootsraping is done")
+            wait_for_mysqld(mysqld)
     except Exception as err:
         LOG.exception(err)
     finally:
+        etcd_deregister_in_path(etcd_client, 'queue')
+        etcd_deregister_in_path(etcd_client, 'nodes')
         lock.release()
         LOG.info("Successfuly released lock")
 
 if __name__ == "__main__":
-    main(ttl=60)
+    main(ttl=100)
 
 # vim: set ts=4 sw=4 tw=0 et :
 # TODO(TZINFO)

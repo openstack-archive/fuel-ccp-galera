@@ -27,8 +27,6 @@ open_files_limit = 102400
 wsrep_slave_threads = 4
 wsrep_cluster_address = gcomm://
 wsrep_provider = /usr/lib/galera3/libgalera_smm.so
-
 wsrep_cluster_name = {{ percona.cluster_name }}
-
 wsrep_sst_method = xtrabackup-v2
-wsrep_sst_auth = "root:"
+wsrep_sst_auth = "xtrabackup:{{ percona.xtrabackup_password }}"
