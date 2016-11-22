@@ -15,7 +15,7 @@ service:
     - name: galera
       image: percona
       probes:
-        readiness: "true"
+        readiness: "/opt/ccp/bin/percona_readiness.py"
         liveness:
           command: "true"
           type: "exec"
@@ -50,6 +50,10 @@ files:
   mycnf:
     path: /etc/mysql/my.cnf
     content: my.cnf.j2
+  readiness:
+    path: /opt/ccp/bin/percona_readiness.py
+    content: percona_readiness.py
+    perm: "0750"
   galera-checker:
     path: /opt/ccp/bin/galera_checker.py
     content: galera_checker.py
