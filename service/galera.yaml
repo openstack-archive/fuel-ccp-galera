@@ -4,6 +4,14 @@ service:
   ports:
     - {{ percona.port }}
   containers:
+    - name: galera-checker
+      image: galera-checker
+      daemon:
+        files:
+          - galera-checker
+        dependencies:
+          - etcd
+        command: /opt/ccp/bin/galera_checker.py --allow_desynced
     - name: galera
       image: percona
       probes:
@@ -42,3 +50,7 @@ files:
   mycnf:
     path: /etc/mysql/my.cnf
     content: my.cnf.j2
+  galera-checker:
+    path: /opt/ccp/bin/galera_checker.py
+    content: galera_checker.py
+    perm: "0755"
