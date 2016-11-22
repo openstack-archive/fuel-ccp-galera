@@ -8,6 +8,7 @@ configs:
     cluster_name: "k8scluster"
     xtrabackup_password: "password"
     monitor_password: "password"
+    gcache_size: "1G"
     port:
       cont: 3306
 url:
