@@ -33,7 +33,7 @@ LOG.setLevel(logging.DEBUG)
 CONNECTION_ATTEMPTS = 3
 CONNECTION_DELAY = 5
 FIRST_RUN = True
-ETCD_PATH = "/pxc-cluster/{{ percona.cluster_name }}"
+ETCD_PATH = "/galera/{{ percona.cluster_name }}"
 HOSTNAME = socket.getfqdn()
 IPADDR = socket.gethostbyname(HOSTNAME)
 
@@ -100,13 +100,13 @@ def check_galera_state(mysql_client, etcd_client, ttl):
         WAS_JOINED = True
         OLD_STATE = SYNCED_STATE
         LOG.info("State OK: %s", state_comment)
-        _etcd_update(etcd_client, ttl)
+        etcd_register_in_path(etcd_client, 'nodes', ttl)
     elif state == DONOR_DESYNCED_STATE and args.allow_desynced:
         state = wsrep_data['wsrep_local_state_comment']
         WAS_JOINED = True
         OLD_STATE = DONOR_DESYNCED_STATE
         LOG.info("State OK: %s", state_comment)
-        _etcd_update(etcd_client, ttl)
+        etcd_register_in_path(etcd_client, 'nodes', ttl)
     elif state == JOINED_STATE and WAS_JOINED:
         if OLD_STATE == JOINED_STATE:
             LOG.info("State BAD: %s", state_comment)
@@ -119,37 +119,36 @@ def check_galera_state(mysql_client, etcd_client, ttl):
             LOG.info("State OK: %s", state_comment)
             LOG.info("Probably will sync soon")
             OLD_STATE = JOINED_STATE
-            _etcd_update(etcd_client, ttl)
+            etcd_register_in_path(etcd_client, 'nodes', ttl)
     else:
         LOG.info("State OK: %s", state_comment)
         LOG.info("Just joined")
         WAS_JOINED = True
         OLD_STATE = JOINED_STATE
-        _etcd_update(etcd_client, ttl)
+        etcd_register_in_path(etcd_client, 'nodes', ttl)
 
 
 @retry
 def _etcd_delete(etcd_client):
 
     # Add locking before delete operation. Possible race.
-    key = os.path.join(ETCD_PATH, IPADDR)
+    key = os.path.join(ETCD_PATH, 'nodes', IPADDR)
     # etcd_client.delete(key, recursive=True, dir=True)
     LOG.warning("NOOP: Deleted node's key '%s'", key)
 
 
-@retry
-def _etcd_update(etcd_client, ttl):
+def _etcd_set(etcd_client, data, ttl):
 
-    for key in ['', 'ctime', 'ipaddr', 'hostname']:
-        full_key = os.path.join(ETCD_PATH, IPADDR, key)
-        isdir = False if key else True
-        try:
-            etcd_client.write(full_key, None, ttl=ttl,
-                              dir=isdir, prevExist=True)
-            LOG.info("Set ttl for '%s' to %s", full_key, ttl)
-        except etcd.EtcdKeyNotFound:
-            # Probably we should fail here
-            LOG.info("Cant find the '%s' key", full_key)
+    key = os.path.join(ETCD_PATH, data[0], IPADDR)
+    etcd_client.set(key, data[1], ttl=ttl)
+    LOG.info("Set %s with value '%s'", key, data[1])
+
+
+@retry
+def etcd_register_in_path(etcd_client, path, ttl):
+
+    key = os.path.join(ETCD_PATH, path, IPADDR)
+    _etcd_set(etcd_client, (path, time.time()), ttl)
 
 
 if __name__ == "__main__":
