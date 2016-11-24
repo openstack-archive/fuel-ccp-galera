@@ -35,6 +35,8 @@ def set_globals():
     ETCD_PATH = "/galera/%s" % config['percona']['cluster_name']
     ETCD_HOST = "etcd.%s" % config['namespace']
     ETCD_PORT = int(config['etcd']['client_port']['cont'])
+
+
 def get_mysql_client():
 
     return pymysql.connect(host='127.0.0.1',
