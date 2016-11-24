@@ -1,3 +1,4 @@
+dsl_version: 0.1.0
 service:
   name: {{ service.database }}
   kind: DaemonSet
@@ -15,10 +16,13 @@ service:
     - name: galera
       image: percona
       probes:
-        readiness: "/opt/ccp/bin/percona_readiness.py"
+        readiness: "true"
         liveness:
-          command: "true"
-          type: "exec"
+          path: "/"
+          type: "httpGet"
+          port: 8080
+          timeout: 3
+          initialDelay: 80
       volumes:
         - name: mysql-logs
           path: "/var/log/ccp/mysql"
@@ -49,10 +53,6 @@ files:
   mycnf:
     path: /etc/mysql/my.cnf
     content: my.cnf.j2
-  readiness:
-    path: /opt/ccp/bin/percona_readiness.py
-    content: percona_readiness.py
-    perm: "0750"
   galera-checker:
     path: /opt/ccp/bin/galera_checker.py
     content: galera_checker.py
