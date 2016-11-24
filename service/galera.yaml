@@ -1,3 +1,4 @@
+dsl_version: 0.1.0
 service:
   name: {{ service.database }}
   kind: DaemonSet
@@ -17,8 +18,11 @@ service:
       probes:
         readiness: "/opt/ccp/bin/percona_readiness.py"
         liveness:
-          command: "true"
-          type: "exec"
+          path: "/"
+          type: "httpGet"
+          port: 8080
+          timeout: 3
+          initialDelay: 80
       volumes:
         - name: mysql-logs
           path: "/var/log/ccp/mysql"
@@ -37,6 +41,7 @@ service:
         files:
           - entrypoint
           - mycnf
+          - readiness
         dependencies:
           - etcd
         command: /opt/ccp/bin/entrypoint.py
