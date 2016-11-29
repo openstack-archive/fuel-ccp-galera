@@ -5,13 +5,29 @@ service:
   ports:
     - {{ percona.port }}
   containers:
+    - name: galera-checker
+      image: galera-checker
+      volumes:
+        - name: mysql-storage
+          path: "/var/lib/mysql"
+          type: host
+          readOnly: true
+      daemon:
+        files:
+          - galera-checker
+        dependencies:
+          - etcd
+        command: "/opt/ccp/bin/galera_checker.py --available_when_donor liveness"
     - name: galera
       image: percona
       probes:
-        readiness: "true"
+        readiness: "/opt/ccp/bin/galera_checker.py readiness"
         liveness:
-          command: "true"
-          type: "exec"
+          path: "/"
+          type: "httpGet"
+          port: 8080
+          timeout: 5
+          initialDelay: 60
       volumes:
         - name: mysql-logs
           path: "/var/log/ccp/mysql"
@@ -30,6 +46,7 @@ service:
         files:
           - entrypoint
           - mycnf
+          - galera-checker
         dependencies:
           - etcd
         command: /opt/ccp/bin/entrypoint.py
@@ -42,3 +59,7 @@ files:
   mycnf:
     path: /etc/mysql/my.cnf
     content: my.cnf.j2
+  galera-checker:
+    path: /opt/ccp/bin/galera_checker.py
+    content: galera_checker.py
+    perm: "0755"
