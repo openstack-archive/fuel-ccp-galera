@@ -18,6 +18,7 @@ HOSTNAME = socket.getfqdn()
 IPADDR = socket.gethostbyname(HOSTNAME)
 DATADIR = "/var/lib/mysql"
 INIT_FILE = os.path.join(DATADIR, 'init.ok')
+GRASTATE_FILE = os.path.join(DATADIR, 'grastate.dat')
 GLOBALS_PATH = '/etc/ccp/globals/globals.json'
 EXPECTED_NODES = 3
 
@@ -129,8 +130,9 @@ def datadir_cleanup(path):
 
 def create_init_flag():
 
-    open(INIT_FILE, 'a').close()
-    LOG.debug("Create init_ok file: %s", INIT_FILE)
+    if not os.path.isfile(INIT_FILE):
+        open(INIT_FILE, 'a').close()
+        LOG.debug("Create init_ok file: %s", INIT_FILE)
 
 
 def execute_cmd(cmd):
@@ -206,7 +208,7 @@ def fetch_wsrep_data():
 
 
 @retry
-def get_oldest_node(etcd_client, path):
+def get_oldest_node_by_ctime(etcd_client, path):
 
     key = os.path.join(ETCD_PATH, path)
     root = etcd_client.get(key)
@@ -217,6 +219,20 @@ def get_oldest_node(etcd_client, path):
     return result[0][0]
 
 
+@retry
+def get_oldest_node_by_seqno(etcd_client, path):
+
+    key = os.path.join(ETCD_PATH, path)
+    root = etcd_client.get(key)
+    result = [(str(child.key).replace(key + "/", ''), int(child.value))
+              for child in root.children]
+    result.sort(key=lambda x: x[1])
+    LOG.debug("ALL seqno is %s", result)
+    LOG.info("Oldest node is %s, am %s", result[-1][0], IPADDR)
+    return result[-1][0]
+
+
+@retry
 def _etcd_set(etcd_client, data, ttl):
 
     key = os.path.join(ETCD_PATH, data[0])
@@ -224,11 +240,17 @@ def _etcd_set(etcd_client, data, ttl):
     LOG.info("Set %s with value '%s'", key, data[1])
 
 
-@retry
 def etcd_register_in_path(etcd_client, path, ttl=60):
 
     key = os.path.join(path, IPADDR)
     _etcd_set(etcd_client, (key, time.time()), ttl)
+
+
+def etcd_set_seqno(etcd_client, ttl):
+
+    seqno = mysql_get_seqno()
+    key = os.path.join('seqno', IPADDR)
+    _etcd_set(etcd_client, (key, seqno), ttl)
 
 
 def etcd_deregister_in_path(etcd_client, path):
@@ -241,14 +263,24 @@ def etcd_deregister_in_path(etcd_client, path):
         LOG.warning("Key %s not exist", key)
 
 
-def is_cluster_running(etcd_client):
+def mysql_get_seqno():
+
+    if os.path.isfile(GRASTATE_FILE):
+        with open(GRASTATE_FILE) as f:
+            content = f.readlines()
+        for line in content:
+            if line.startswith('seqno'):
+                return line.partition(':')[2].strip()
+
+
+def get_cluster_state(etcd_client):
 
     key = os.path.join(ETCD_PATH, 'state')
     try:
         state = etcd_client.read(key).value
-        return True if state == 'STEADY' else False
+        return state
     except etcd.EtcdKeyNotFound:
-        return False
+        return None
 
 
 def wait_for_expected_state(etcd_client, ttl):
@@ -266,9 +298,13 @@ def wait_for_expected_state(etcd_client, ttl):
 
 def wait_for_my_turn(etcd_client):
 
+    state = get_cluster_state(etcd_client)
     LOG.info("Waiting for my turn to join cluster")
     while True:
-        oldest_node = get_oldest_node(etcd_client, 'queue')
+        if state == "RECOVERY":
+            oldest_node = get_oldest_node_by_seqno(etcd_client, 'seqno')
+        else:
+            oldest_node = get_oldest_node_by_ctime(etcd_client, 'queue')
         if IPADDR == oldest_node:
             LOG.info("It's my turn to join the cluster")
             return
@@ -276,7 +312,7 @@ def wait_for_my_turn(etcd_client):
             time.sleep(5)
 
 
-def wait_for_sync():
+def wait_for_sync(mysqld):
 
     while True:
         try:
@@ -284,13 +320,20 @@ def wait_for_sync():
             state = int(wsrep_data['wsrep_local_state'])
             if state == 4:
                 LOG.info("Node synced")
+                # If sync was done by SST all files in datadir was lost
+                create_init_flag()
                 break
             else:
                 LOG.debug("Waiting node to be synced. Current state is: %s",
                           wsrep_data['wsrep_local_state_comment'])
                 time.sleep(5)
         except Exception:
-            time.sleep(5)
+            if mysqld.poll() is None:
+                time.sleep(5)
+            else:
+                LOG.error('Mysqld was terminated, exit code was: %s',
+                          mysqld.returncode)
+                sys.exit(mysqld.returncode)
 
 
 def check_if_im_last(etcd_client):
@@ -386,62 +429,105 @@ def mysql_init():
     LOG.info("Mysql bootstraping is done")
 
 
+def check_cluster(etcd_client):
+
+    state = get_cluster_state(etcd_client)
+    nodes_status = fetch_status(etcd_client, 'nodes')
+    if not nodes_status and state == 'STEADY':
+        LOG.warning("Cluster is in the STEADY state, but there no"
+                    " alive nodes detected, running cluster recovery")
+        update_cluster_state(etcd_client, 'RECOVERY')
+
+def run_step_one(etcd_client, lock, ttl):
+
+    LOG.info("Step 1 - Queue")
+    state = get_cluster_state(etcd_client)
+    etcd_register_in_path(etcd_client, 'queue', ttl)
+    if state == "RECOVERY":
+        etcd_set_seqno(etcd_client, ttl=None)
+    lock.release()
+    LOG.info("Successfuly released lock")
+    wait_for_expected_state(etcd_client, ttl)
+
+
+def run_step_two(etcd_client, lock, ttl):
+
+    LOG.info("Step 2 - Joining the cluster")
+    LOG.info("Locking...")
+    lock.acquire(blocking=True, lock_ttl=ttl)
+    LOG.info("Successfuly acquired lock")
+    state = get_cluster_state(etcd_client)
+    nodes_status = fetch_status(etcd_client, 'nodes')
+    first_one = False if nodes_status else True
+    available_nodes = create_join_list(nodes_status)
+    mysqld = run_mysqld(available_nodes)
+    wait_for_sync(mysqld)
+    etcd_register_in_path(etcd_client, 'nodes', ttl)
+    etcd_deregister_in_path(etcd_client, 'queue')
+    if state == "RECOVERY":
+        etcd_deregister_in_path(etcd_client, 'seqno')
+    last_one = check_if_im_last(etcd_client)
+    lock.release()
+    LOG.info("Successfuly released lock")
+    return (first_one, last_one, mysqld)
+
+
+def run_step_tree(etcd_client, first_one, last_one):
+    LOG.info("Step 3 - Update cluster metadata")
+    state = get_cluster_state(etcd_client)
+    if first_one:
+        update_uuid(etcd_client)
+        if state != 'RECOVERY':
+            update_cluster_state(etcd_client, 'BUILDING')
+    if last_one:
+        update_cluster_state(etcd_client, 'STEADY')
+
+
 def main(ttl):
 
     if not os.path.isfile(INIT_FILE):
         mysql_init()
     else:
+        run_cmd("mysqld_safe --wsrep-recover")
         LOG.info("Init file '%s' found. Skiping mysql bootstrap", INIT_FILE)
+
     try:
         etcd_client = get_etcd_client()
-        lock = etcd.Lock(etcd_client, 'galera_bootstrap')
+        lock = etcd.Lock(etcd_client, 'galera')
         LOG.info("Locking...")
         lock.acquire(blocking=True, lock_ttl=ttl)
         LOG.info("Successfuly acquired lock")
+        check_cluster(etcd_client)
+        state = get_cluster_state(etcd_client)
 
-        if is_cluster_running(etcd_client):
-            LOG.info("Detected running cluster. Assuming node reconnect")
+        # Scenario 1: Initial bootstrap
+        if state is None or state == 'BUILDING':
+            LOG.info("No running cluster detected - starting bootstrap")
+            run_step_one(etcd_client, lock, ttl)
+            first_one, last_one, mysqld = run_step_two(etcd_client, lock, ttl)
+            run_step_tree(etcd_client, first_one, last_one)
+            LOG.info("Bootsraping is done. Node is ready.")
+
+        # Scenario 2: Re-connect
+        elif state == 'STEADY':
+            LOG.info("Detected running cluster, re-connecting")
             nodes_status = fetch_status(etcd_client, 'nodes')
             available_nodes = create_join_list(nodes_status)
             mysqld = run_mysqld(available_nodes)
-            wait_for_sync()
+            wait_for_sync(mysqld)
             etcd_register_in_path(etcd_client, 'nodes', ttl)
             LOG.info("Node joined and ready")
             lock.release()
             LOG.info("Successfuly released lock")
-        else:
-            LOG.info("No running cluster detected - starting bootstrap")
 
-            LOG.info("Step 1 - Queue")
-            etcd_register_in_path(etcd_client, 'queue', ttl)
-            lock.release()
-            LOG.info("Successfuly released lock")
-            wait_for_expected_state(etcd_client, ttl)
-
-            LOG.info("Step 2 - Joining the cluster")
-            LOG.info("Locking...")
-            lock.acquire(blocking=True, lock_ttl=ttl)
-            LOG.info("Successfuly acquired lock")
-            nodes_status = fetch_status(etcd_client, 'nodes')
-            first_one = False if nodes_status else True
-            available_nodes = create_join_list(nodes_status)
-            mysqld = run_mysqld(available_nodes)
-            wait_for_sync()
-            # If sync was done by SST all files in datadir was lost
-            create_init_flag()
-            etcd_register_in_path(etcd_client, 'nodes', ttl)
-            etcd_deregister_in_path(etcd_client, 'queue')
-            last_one = check_if_im_last(etcd_client)
-            lock.release()
-            LOG.info("Successfuly released lock")
-
-            LOG.info("Step 3 - Update cluster metadata")
-            if first_one:
-                update_uuid(etcd_client)
-                update_cluster_state(etcd_client, 'BUILDING')
-            if last_one:
-                update_cluster_state(etcd_client, 'STEADY')
-            LOG.info("Bootsraping is done. Node is ready.")
+        # Scenario 3: Recovery
+        elif state == 'RECOVERY':
+            LOG.warning("Cluster is in the RECOVERY state, re-connecting to"
+                        " the node with the oldest data")
+            run_step_one(etcd_client, lock, ttl)
+            first_one, last_one, mysqld = run_step_two(etcd_client, lock, ttl)
+            run_step_tree(etcd_client, first_one, last_one)
+            LOG.info("Recovery is done. Node is ready.")
 
         wait_for_mysqld(mysqld)
     except Exception as err:
@@ -449,6 +535,7 @@ def main(ttl):
     finally:
         etcd_deregister_in_path(etcd_client, 'queue')
         etcd_deregister_in_path(etcd_client, 'nodes')
+        etcd_deregister_in_path(etcd_client, 'queue')
         lock.release()
         LOG.info("Successfuly released lock")
 
