@@ -1,0 +1,10 @@
+Code-Review+2: Aleksandr Mogylchenko <amogylchenko@mirantis.com>
+Code-Review+1: Sergii Golovatiuk <sgolovatiuk@mirantis.com>
+Code-Review+2: Artur Zarzycki <azarzycki@mirantis.com>
+Workflow+1: Artur Zarzycki <azarzycki@mirantis.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 02 Dec 2016 13:55:53 +0000
+Reviewed-on: https://review.openstack.org/400964
+Project: openstack/fuel-ccp-galera
+Branch: refs/heads/master
