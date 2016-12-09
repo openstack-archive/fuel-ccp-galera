@@ -1,7 +1,7 @@
-dsl_version: 0.1.0
+dsl_version: 0.2.0
 service:
   name: {{ service.database }}
-  kind: DaemonSet
+  antiAffinity: local
   ports:
     - {{ percona.port }}
   containers:
