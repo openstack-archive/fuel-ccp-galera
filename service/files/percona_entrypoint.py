@@ -146,14 +146,16 @@ def run_cmd(cmd, check_result=False):
 
 def run_mysqld(available_nodes):
 
-    cmd = ("mysqld --user=mysql --wsrep_cluster_name='%s'"
-           " --wsrep_cluster_address='gcomm://%s'"
+    cmd = ("mysqld --user=mysql --wsrep_cluster_name=%s"
+           " --wsrep_cluster_address=%s"
            " --wsrep_sst_method=xtrabackup-v2"
-           " --wsrep_sst_auth='xtrabackup:%s'"
-           " --wsrep_node_address='%s'"
+           " --wsrep_sst_auth=%s"
+           " --wsrep_node_address=%s"
            " --pxc_strict_mode=PERMISSIVE" %
-           (CLUSTER_NAME, available_nodes,
-            XTRABACKUP_PASSWORD, IPADDR))
+           (six.moves.shlex_quote(CLUSTER_NAME),
+            "gcomm://%s" % six.moves.shlex_quote(available_nodes),
+            "xtrabackup:%s" % six.moves.shlex_quote(XTRABACKUP_PASSWORD),
+            six.moves.shlex_quote(IPADDR)))
     mysqld_proc = run_cmd(cmd)
     wait_for_mysqld_to_start(mysqld_proc, insecure=False)
     return mysqld_proc
@@ -175,14 +177,15 @@ def fetch_status(etcd_client, path):
     key = os.path.join(ETCD_PATH, path)
     try:
         root = etcd_client.get(key)
-        result = [str(child.key).replace(key + "/", '')
-                  for child in root.children
-                  if str(child.key) != key]
-        LOG.debug("Current nodes in %s is: %s", key, result)
-        return result
     except etcd.EtcdKeyNotFound:
         LOG.debug("Current nodes in %s is: %s", key, None)
         return []
+
+    result = [str(child.key).replace(key + "/", '')
+              for child in root.children
+              if str(child.key) != key]
+    LOG.debug("Current nodes in %s is: %s", key, result)
+    return result
 
 
 def fetch_wsrep_data():
@@ -443,16 +446,16 @@ def mysql_init():
 
     LOG.info("Mysql is running, setting up the permissions")
     sql_list = [("CREATE USER 'root'@'%%' IDENTIFIED BY %s",
-                six.moves.shlex_quote(MYSQL_ROOT_PASSWORD)),
+                MYSQL_ROOT_PASSWORD),
                 ("GRANT ALL ON *.* TO 'root'@'%' WITH GRANT OPTION", None),
                 ("ALTER USER 'root'@'localhost' IDENTIFIED BY %s",
-                six.moves.shlex_quote(MYSQL_ROOT_PASSWORD)),
+                MYSQL_ROOT_PASSWORD),
                 ("CREATE USER 'xtrabackup'@'localhost' IDENTIFIED BY %s",
-                six.moves.shlex_quote(XTRABACKUP_PASSWORD)),
+                XTRABACKUP_PASSWORD),
                 ("GRANT RELOAD,PROCESS,LOCK TABLES,REPLICATION CLIENT ON *.*"
                 " TO 'xtrabackup'@'localhost'", None),
                 ("GRANT REPLICATION CLIENT ON *.* TO monitor@'%%' IDENTIFIED"
-                " BY %s", six.moves.shlex_quote(MONITOR_PASSWORD)),
+                " BY %s", MONITOR_PASSWORD),
                 ("DROP DATABASE IF EXISTS test", None),
                 ("FLUSH PRIVILEGES", None)]
     try:
