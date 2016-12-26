@@ -254,7 +254,8 @@ class GaleraHttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         LOG.debug("Started processing GET request")
         try:
             checker = GaleraChecker()
-            state = 200 if checker.check_if_galera_alive() else 503
+            alive = checker.check_if_galera_alive()
+            state = 200 if alive else 503
             self.send_response(state)
             self.end_headers()
         except Exception as err:
@@ -276,7 +277,8 @@ def run_liveness(port=8080):
 
 def run_readiness():
     checker = GaleraChecker()
-    sys.exit(0) if checker.check_if_galera_ready() else sys.exit(1)
+    ready = checker.check_if_galera_ready()
+    sys.exit(0) if ready else sys.exit(1)
 
 
 def get_config():
