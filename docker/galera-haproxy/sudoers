@@ -1,0 +1,1 @@
+haproxy ALL=(root) NOPASSWD: /bin/chown -R haproxy\: /run/haproxy, /bin/mkdir /run/haproxy
