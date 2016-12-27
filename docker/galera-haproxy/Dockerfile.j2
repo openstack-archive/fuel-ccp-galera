@@ -1,0 +1,14 @@
+FROM {{ image_spec("base-tools") }}
+MAINTAINER {{ maintainer }}
+
+COPY {{ render('sources.list.debian.j2') }} /etc/apt/sources.list.d/testing.list
+COPY sudoers /etc/sudoers.d/haproxy_sudoers
+
+RUN apt-get update \
+    && apt-get install -y -t testing haproxy socat \
+    && apt-get clean \
+    && pip install -U haproxyadmin \
+    && chown -R haproxy: /etc/haproxy /var/lib/haproxy \
+    && usermod -a -G microservices haproxy
+
+USER haproxy
