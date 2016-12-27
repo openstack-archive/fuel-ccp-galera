@@ -620,6 +620,7 @@ def main(ttl):
         etcd_deregister_in_path(etcd_client, 'queue')
         etcd_deregister_in_path(etcd_client, 'nodes')
         etcd_deregister_in_path(etcd_client, 'seqno')
+        etcd_deregister_in_path(etcd_client, 'leader')
         release_lock(lock)
 
 
