@@ -1,0 +1,33 @@
+global
+    # No syslog in containers
+    #log /dev/log local0
+    stats socket /run/haproxy/admin.sock mode 660 level admin
+    stats timeout 30s
+
+    # Tunes from MOS
+    tune.bufsize  32768
+    tune.maxrewrite  1024
+
+    # Default SSL material locations
+    ca-base /etc/ssl/certs
+    crt-base /etc/ssl/private
+    ssl-default-bind-ciphers ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:RSA+AESGCM:RSA+AES:!aNULL:!MD5:!DSS
+    ssl-default-bind-options no-sslv3
+
+defaults
+    log     global
+    mode    tcp
+    option  tcplog
+    option  logasap
+    option  dontlognull
+    option  mysql-check
+    option  tcpka
+    timeout connect 10s
+    timeout client  28801s
+    timeout server  28801s
+
+listen galera-cluster
+    bind 0.0.0.0:{{ percona.port.cont }}
+    # We start with non-working configuration and update it via admin socket in the runtime
+    server primary 127.0.0.1:11111 check
+
