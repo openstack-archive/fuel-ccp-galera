@@ -18,6 +18,19 @@ service:
         dependencies:
           - etcd
         command: "/opt/ccp/bin/galera_checker.py liveness"
+    - name: galera-haproxy
+      image: galera-haproxy
+      pre:
+        - name: mkdir-run
+          command: "sudo /bin/mkdir /run/haproxy"
+        - name: chown-run
+          command: "sudo /bin/chown -R haproxy: /run/haproxy"
+      daemon:
+        files:
+          - haproxy-conf
+        dependencies:
+          - etcd
+        command: "haproxy -f /etc/haproxy/haproxy.conf"
     - name: galera
       image: percona
       probes:
@@ -63,3 +76,6 @@ files:
     path: /opt/ccp/bin/galera_checker.py
     content: galera_checker.py
     perm: "0755"
+  haproxy-conf:
+    path: /etc/haproxy/haproxy.conf
+    content: haproxy.conf.j2
