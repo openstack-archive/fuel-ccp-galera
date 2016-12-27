@@ -292,7 +292,7 @@ def check_for_stale_seqno(etcd_client):
                 LOG.warning("Key %s not exist", key)
     else:
         LOG.debug("Found seqno set is equals to the queue set: %s = %s",
-                  (queue_set, seqno_set))
+                  queue_set, seqno_set)
 
 
 def wait_for_expected_state(etcd_client, ttl):
@@ -412,7 +412,7 @@ def wait_for_mysqld_to_start(proc, insecure):
         except Exception:
             time.sleep(1)
     else:
-        LOG.info("Mysql boot failed")
+        LOG.error("Mysql boot failed")
         raise RuntimeError("Process exited with code: %s" % proc.returncode)
 
 
