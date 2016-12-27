@@ -76,7 +76,7 @@ def get_etcd_client():
 @retry
 def get_mysql_client():
         mysql_client = pymysql.connect(host='127.0.0.1',
-                                       port=3306,
+                                       port=33306,
                                        user='monitor',
                                        password=MONITOR_PASSWORD,
                                        connect_timeout=1,
