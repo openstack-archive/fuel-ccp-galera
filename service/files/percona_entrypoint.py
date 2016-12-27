@@ -242,11 +242,14 @@ def etcd_set_seqno(etcd_client, ttl):
     _etcd_set(etcd_client, key, seqno, ttl)
 
 
-def etcd_deregister_in_path(etcd_client, path):
+def etcd_deregister_in_path(etcd_client, path, prevValue=False):
 
     key = os.path.join(ETCD_PATH, path, IPADDR)
     try:
-        etcd_client.delete(key, recursive=True)
+        if prevValue:
+            etcd_client.delete(key, prevValue=prevValue)
+        else:
+            etcd_client.delete(key, recursive=True)
         LOG.warning("Deleted key %s", key)
     except etcd.EtcdKeyNotFound:
         LOG.warning("Key %s not exist", key)
@@ -620,6 +623,7 @@ def main(ttl):
         etcd_deregister_in_path(etcd_client, 'queue')
         etcd_deregister_in_path(etcd_client, 'nodes')
         etcd_deregister_in_path(etcd_client, 'seqno')
+        etcd_deregister_in_path(etcd_client, 'leader', prevValue=IPADDR)
         release_lock(lock)
 
 
