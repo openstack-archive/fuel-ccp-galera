@@ -1,0 +1,9 @@
+Code-Review+2: Sergey Lukjanov <slukjanov@mirantis.com>
+Code-Review+2: Andrey Pavlov <apavlov@mirantis.com>
+Workflow+1: Andrey Pavlov <apavlov@mirantis.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 28 Dec 2016 07:07:33 +0000
+Reviewed-on: https://review.openstack.org/415265
+Project: openstack/fuel-ccp-galera
+Branch: refs/heads/master
