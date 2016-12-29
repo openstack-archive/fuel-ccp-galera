@@ -23,7 +23,6 @@ INIT_FILE = os.path.join(DATADIR, 'init.ok')
 PID_FILE = os.path.join(DATADIR, "mysqld.pid")
 GRASTATE_FILE = os.path.join(DATADIR, 'grastate.dat')
 GLOBALS_PATH = '/etc/ccp/globals/globals.json'
-EXPECTED_NODES = 3
 
 LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
 LOG_FORMAT = "%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s"
@@ -31,6 +30,7 @@ logging.basicConfig(format=LOG_FORMAT, datefmt=LOG_DATEFMT)
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.DEBUG)
 
+EXPECTED_NODES = None
 MYSQL_ROOT_PASSWORD = None
 CLUSTER_NAME = None
 XTRABACKUP_PASSWORD = None
@@ -83,7 +83,7 @@ def set_globals():
     config = get_config()
     global MYSQL_ROOT_PASSWORD, CLUSTER_NAME, XTRABACKUP_PASSWORD
     global MONITOR_PASSWORD, CONNECTION_ATTEMPTS, CONNECTION_DELAY
-    global ETCD_PATH, ETCD_HOST, ETCD_PORT
+    global ETCD_PATH, ETCD_HOST, ETCD_PORT, EXPECTED_NODES
 
     MYSQL_ROOT_PASSWORD = config['db']['root_password']
     CLUSTER_NAME = config['percona']['cluster_name']
@@ -91,6 +91,7 @@ def set_globals():
     MONITOR_PASSWORD = config['percona']['monitor_password']
     CONNECTION_ATTEMPTS = config['etcd']['connection_attempts']
     CONNECTION_DELAY = config['etcd']['connection_delay']
+    EXPECTED_NODES = int(config['percona']['cluster_size'])
     ETCD_PATH = "/galera/%s" % config['percona']['cluster_name']
     ETCD_HOST = "etcd.%s" % config['namespace']
     ETCD_PORT = int(config['etcd']['client_port']['cont'])
