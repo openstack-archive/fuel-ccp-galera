@@ -157,8 +157,7 @@ def run_mysqld(available_nodes, etcd_client, lock):
            " --wsrep_cluster_address=%s"
            " --wsrep_sst_method=xtrabackup-v2"
            " --wsrep_sst_auth=%s"
-           " --wsrep_node_address=%s"
-           " --pxc_strict_mode=PERMISSIVE" %
+           " --wsrep_node_address=%s" %
            (six.moves.shlex_quote(CLUSTER_NAME),
             "gcomm://%s" % six.moves.shlex_quote(available_nodes),
             "xtrabackup:%s" % six.moves.shlex_quote(XTRABACKUP_PASSWORD),
