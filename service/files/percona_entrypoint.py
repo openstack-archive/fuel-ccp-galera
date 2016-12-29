@@ -8,6 +8,7 @@ import os.path
 import shutil
 import socket
 import subprocess
+import signal
 import six.moves
 import sys
 import time
@@ -144,7 +145,7 @@ def run_cmd(cmd, check_result=False):
     return proc
 
 
-def run_mysqld(available_nodes):
+def run_mysqld(available_nodes, etcd_client, lock):
 
     cmd = ("mysqld --user=mysql --wsrep_cluster_name=%s"
            " --wsrep_cluster_address=%s"
@@ -158,6 +159,17 @@ def run_mysqld(available_nodes):
             six.moves.shlex_quote(IPADDR)))
     mysqld_proc = run_cmd(cmd)
     wait_for_mysqld_to_start(mysqld_proc, insecure=False)
+
+    def sig_handler(signum, frame):
+        LOG.info("Caught a signal: %d", signum)
+        etcd_deregister_in_path(etcd_client, 'queue')
+        etcd_deregister_in_path(etcd_client, 'nodes')
+        etcd_deregister_in_path(etcd_client, 'seqno')
+        etcd_deregister_in_path(etcd_client, 'leader', prevValue=IPADDR)
+        release_lock(lock)
+        mysqld_proc.send_signal(signum)
+
+    signal.signal(signal.SIGTERM, sig_handler)
     return mysqld_proc
 
 
@@ -505,7 +517,7 @@ def run_create_queue(etcd_client, lock, ttl):
     """
 
     LOG.info("Creating recovery queue")
-    etcd_register_in_path(etcd_client, 'queue')
+    etcd_register_in_path(etcd_client, 'queue', ttl=None)
     etcd_set_seqno(etcd_client, ttl=None)
     release_lock(lock)
     wait_for_expected_state(etcd_client, ttl)
@@ -534,12 +546,12 @@ def run_join_cluster(etcd_client, lock, ttl):
     state = get_cluster_state(etcd_client)
     nodes_status = fetch_status(etcd_client, 'nodes')
     available_nodes, first_one = create_join_list(nodes_status)
-    mysqld = run_mysqld(available_nodes)
+    mysqld = run_mysqld(available_nodes, etcd_client, lock)
     wait_for_sync(mysqld)
     etcd_register_in_path(etcd_client, 'nodes', ttl)
-    etcd_deregister_in_path(etcd_client, 'queue')
     if state == "RECOVERY":
         etcd_deregister_in_path(etcd_client, 'seqno')
+        etcd_deregister_in_path(etcd_client, 'queue')
     last_one = check_if_im_last(etcd_client)
     release_lock(lock)
     return (first_one, last_one, mysqld)
@@ -610,7 +622,6 @@ def main(ttl):
             first_one, last_one, mysqld = run_join_cluster(etcd_client, lock,
                                                            ttl)
             run_update_metadata(etcd_client, first_one, last_one)
-            etcd_deregister_in_path(etcd_client, 'seqno')
             LOG.info("Recovery is done. Node is ready.")
 
         wait_for_mysqld(mysqld)
