@@ -9,6 +9,7 @@ configs:
     xtrabackup_password: "password"
     monitor_password: "password"
     gcache_size: "1G"
+    cluster_size: 3
     port:
       cont: 3306
 url:
