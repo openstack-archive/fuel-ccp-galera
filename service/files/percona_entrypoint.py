@@ -30,6 +30,8 @@ logging.basicConfig(format=LOG_FORMAT, datefmt=LOG_DATEFMT)
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.DEBUG)
 
+FORCE_BOOTSTRAP = None
+FORCE_BOOTSTRAP_NODE = None
 EXPECTED_NODES = None
 MYSQL_ROOT_PASSWORD = None
 CLUSTER_NAME = None
@@ -84,7 +86,10 @@ def set_globals():
     global MYSQL_ROOT_PASSWORD, CLUSTER_NAME, XTRABACKUP_PASSWORD
     global MONITOR_PASSWORD, CONNECTION_ATTEMPTS, CONNECTION_DELAY
     global ETCD_PATH, ETCD_HOST, ETCD_PORT, EXPECTED_NODES
+    global FORCE_BOOTSTRAP, FORCE_BOOTSTRAP_NODE
 
+    FORCE_BOOTSTRAP = config['percona']['force_bootstrap']['enabled']
+    FORCE_BOOTSTRAP_NODE = config['percona']['force_bootstrap']['node']
     MYSQL_ROOT_PASSWORD = config['db']['root_password']
     CLUSTER_NAME = config['percona']['cluster_name']
     XTRABACKUP_PASSWORD = config['percona']['xtrabackup_password']
@@ -332,6 +337,27 @@ def wait_for_my_turn(etcd_client):
     check_for_stale_seqno(etcd_client)
     LOG.info("Waiting for my turn to join cluster")
     while True:
+        if FORCE_BOOTSTRAP:
+            LOG.warning("Force bootstrap flag was detected, skiping normal"
+                        " bootstrap procedure")
+            if FORCE_BOOTSTRAP_NODE is None:
+                LOG.error("Force bootstrap node wasn't set. Can't continue")
+                sys.exit(1)
+
+            LOG.debug("Force bootstrap node is %s", FORCE_BOOTSTRAP_NODE)
+            my_node_name = os.environ['CCP_NODE_NAME']
+            if my_node_name == FORCE_BOOTSTRAP_NODE:
+                LOG.info("This node is the force boostrap one.")
+                return
+            else:
+                LOG.info("This node is not the force boostrap one."
+                         " Waiting for the bootstrap one to create a cluster.")
+                while True:
+                    nodes = fetch_status(etcd_client, 'nodes')
+                    if nodes:
+                        break
+                    else:
+                        time.sleep(5)
         oldest_node = get_oldest_node_by_seqno(etcd_client, 'seqno')
         if IPADDR == oldest_node:
             LOG.info("It's my turn to join the cluster")
