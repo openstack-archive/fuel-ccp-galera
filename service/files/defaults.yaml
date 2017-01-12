@@ -15,6 +15,58 @@ configs:
       node:
     port:
       cont: 3306
+    ssl:
+      enabled: true
+      ca_certificate: |
+        -----BEGIN CERTIFICATE-----
+        MIIDiTCCAnGgAwIBAgIJALtG9gUbbO9sMA0GCSqGSIb3DQEBCwUAMFoxCzAJBgNV
+        BAYTAlJVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRlcm5ldCBX
+        aWRnaXRzIFB0eSBMdGQxEzARBgNVBAMMCms4c2NsdXN0ZXIwIBcNMTcwMTExMTY1
+        OTUzWhgPMjEzMjAxMDkxNjU5NTNaMFoxCzAJBgNVBAYTAlJVMRMwEQYDVQQIDApT
+        b21lLVN0YXRlMSEwHwYDVQQKDBhJbnRlcm5ldCBXaWRnaXRzIFB0eSBMdGQxEzAR
+        BgNVBAMMCms4c2NsdXN0ZXIwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIB
+        AQDc01DAZOlb2Z8ruwMQmAGV5C+XnfPUJMRBDmjWzLuBtvtmkdtBEHBqyVrRuZkL
+        5LTdP1C1JUYUIb6aHiFLO2GeC5dlStrIiGlD3p+4LsYhJtc6Grpjf7SwKSgO1jDH
+        vGR3KXDOPh2QRTM7Q983zN1+cdtVrXuuOpOTKZXgn9EJPFSHqqVi/UWHXNtvmyAl
+        Fy/78qUcH+D+Aw57X/BO7BWCoToGvtx0cEX4ZZiZGK8M4fPw4VMfVT7mGmOG/W/s
+        7YkAR67pg4xKugVmxy2khbWYr2I3JQmMYXWfoEql2MvjNhYc+mF7kMD4GQbCPQ+Q
+        qTVbR0jWBL90E9ZkHakwte6nAgMBAAGjUDBOMB0GA1UdDgQWBBSYmzxVx+eC0wPJ
+        REQVGUHOuwXbwzAfBgNVHSMEGDAWgBSYmzxVx+eC0wPJREQVGUHOuwXbwzAMBgNV
+        HRMEBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBAQBtJUXTXUKeBDSvKTuxaDURbsUZ
+        Qc7ln0qggZb35E1BAb2ZF9Dm8l0/zk76XSZN3Kf20I++sBBjPRfb5UujNtddnkkH
+        h6DrHUbuY827ZlV4351WTmeG8RAGrv/CJyulD/DqbcrbEihL2xHLLgh8q7bBSqRS
+        5dzA06bGuZPQpmBxSjLi5VG88ocksCXzCuj6XAtHw3/vx/d9yBVS64oqeH9ftM0w
+        9nHc9Yd9sRQS31dVLT4Z6f/PbflT6IGQF0wp4xnlP4iIDF4nSPBP6iMGndVW6je0
+        l3slndI+mtQg9hbxFtl7z+NkCbMAcU/dVokc7RuSJR92nr3f2+pIg3R+5eJA
+        -----END CERTIFICATE-----
+      ca_key: |
+        -----BEGIN RSA PRIVATE KEY-----
+        MIIEpAIBAAKCAQEA3NNQwGTpW9mfK7sDEJgBleQvl53z1CTEQQ5o1sy7gbb7ZpHb
+        QRBwasla0bmZC+S03T9QtSVGFCG+mh4hSzthnguXZUrayIhpQ96fuC7GISbXOhq6
+        Y3+0sCkoDtYwx7xkdylwzj4dkEUzO0PfN8zdfnHbVa17rjqTkymV4J/RCTxUh6ql
+        Yv1Fh1zbb5sgJRcv+/KlHB/g/gMOe1/wTuwVgqE6Br7cdHBF+GWYmRivDOHz8OFT
+        H1U+5hpjhv1v7O2JAEeu6YOMSroFZsctpIW1mK9iNyUJjGF1n6BKpdjL4zYWHPph
+        e5DA+BkGwj0PkKk1W0dI1gS/dBPWZB2pMLXupwIDAQABAoIBAQCzRQoFZubbnixO
+        ACBY1E5VNU49tAlCbCa2+c+6sbJ3d+lYN4jbpVDeIGEOabIJqb3672/B32So60wl
+        Kdi1jpuNBrP9k2tR6QwsAQuBJtfKChIoJZKzO/WgHYlboh8vx413/7iIdnzhpowU
+        zODmF/aotB3vzErgAsXTbqsyFAxLhaC1MiNZVzXvSLUFjClK8gKNprDUxVTS3uxu
+        MiebEvxmoZ+YwPjhdjQpQJw0TUr6mWGJIxIufKrJ0XpZZIm/KMiI6auHdKwQ94fW
+        r0L5rnJDO8z9GuTXXk5m/CdXszH7xt5delgCRttepNMbNpnLE5KC/QZk91LZioqN
+        T3CvI/HhAoGBAPEEuJgx5+XArgG7t6PK1AyTcIs23MexwLZqb/wVskmQU+5pLBtL
+        C4NTQU7fOawAYUZr7kbDYgqqBMb0W3A+9hhNLldPaEihJ5Gf4fflQfpL2BIaQREe
+        a+HmUKpwky1Ou+pI1EUg6r5CRnu6cQv7j8w8lvrLE9DSaQ77m/feduFNAoGBAOqN
+        RGy3KaniDu2mkHEi1c9cEaGCnMzFqxtlL9M1pxTw+8F4gF24v0nzqhpk487LbYvE
+        joaz6bCnCXJopFTsreZxTaIeo1wd9WoucmBV4dfkg6CZG+4t7gEsacBokkVWjnxC
+        RmFZtfo3GfWFqXYcfjeRDf2ykkckjpnyw99T4RXDAoGBAI7IVjdLsW7p4+wA8jzl
+        hxPgMNc4bDkdc+ZdTfRQQivUhfSCd++/WJW3N8Rq9/aOzxHyFNn1G9rneCcJUjZA
+        BnjFGIP+9e+5EQDzb+H0/k4yqlGnHg7vL8hHMliWkopPz4FvHdnKM2b9SlY4UIph
+        wIGlD2iJ8DZQwI5wvqhsMY8tAoGAK5hIMIC2wLmglrFPxYd5AAqXyFIzfKf8zqG3
+        CuW9AVptIJ+aFFFjVIZyhmdcJDKRUNoet5C3DbtuORKUAKjhBaTnjgttx5BV7f9m
+        CNvNl0gE4xOyKknlI9iyay3Eihi1cQkMdcmr1i7pp0XJoodXOlK+q/nF0G1OB/Uk
+        TN0VR+sCgYA6e7AnpumUTy1O4RbE8LjeNIsv470borNLKESgw9DeN6L87Vl1/l8O
+        pvxczcxTQSJ91UqCB8638vBu6iMaWb7qercFvw38TlGy0O5fa4RerRO3mqCYwILN
+        e6WrJblMzfNczbBhukXla0Gme5XzE8bqixOtCK6YQzEhAMG4htai/Q==
+        -----END RSA PRIVATE KEY-----
 url:
   percona:
     debian:
