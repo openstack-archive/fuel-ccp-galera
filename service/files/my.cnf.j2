@@ -2,6 +2,12 @@
 bind-address = 0.0.0.0
 port = 33306
 
+{% if percona.ssl.enabled %}
+ssl-ca = /etc/mysql/certs/ca.pem
+ssl-cert = /etc/mysql/certs/server-cert.pem
+ssl-key = /etc/mysql/certs/server-key.pem
+{% endif %}
+
 datadir = /var/lib/mysql
 pid-file = /var/lib/mysql/mysqld.pid
 log-error = /var/log/ccp/mysql/mysql.log
@@ -32,3 +38,16 @@ wsrep_cluster_name = {{ percona.cluster_name }}
 wsrep_sst_method = xtrabackup-v2
 wsrep_sst_auth = "xtrabackup:{{ percona.xtrabackup_password }}"
 wsrep_provider_options = "gcache.size={{ percona.gcache_size }}"
+
+{% if percona.ssl.enabled %}
+[client]
+ssl-ca = /etc/mysql/certs/ca.pem
+ssl-cert = /etc/mysql/certs/client-cert.pem
+ssl-key = /etc/mysql/certs/client-key.pem
+
+[sst]
+encrypt = 4
+ssl-ca = /etc/mysql/certs/ca.pem
+ssl-cert = /etc/mysql/certs/server-cert.pem
+ssl-key = /etc/mysql/certs/server-key.pem
+{% endif %}
