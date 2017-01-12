@@ -18,6 +18,10 @@ BACKEND_NAME = "galera-cluster"
 SERVER_NAME = "primary"
 GLOBALS_PATH = '/etc/ccp/globals/globals.json'
 
+CA_CERT = '/opt/ccp/etc/tls/ca.pem'
+SERVER_CERT = '/opt/ccp/etc/tls/server-cert.pem'
+SERVER_KEY = '/opt/ccp/etc/tls/server-key.pem'
+
 LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
 LOG_FORMAT = "%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s"
 logging.basicConfig(format=LOG_FORMAT, datefmt=LOG_DATEFMT)
@@ -58,7 +62,7 @@ def get_config():
     variables = {}
     with open(GLOBALS_PATH) as f:
         global_conf = json.load(f)
-    for key in ['percona', 'etcd', 'namespace', 'cluster_domain']:
+    for key in ['percona', 'etcd', 'namespace', 'cluster_domain', 'security']:
         variables[key] = global_conf[key]
     LOG.debug(variables)
     return variables
@@ -68,7 +72,7 @@ def set_globals():
 
     config = get_config()
     global CONNECTION_ATTEMPTS, CONNECTION_DELAY
-    global ETCD_PATH, ETCD_HOST, ETCD_PORT
+    global ETCD_PATH, ETCD_HOST, ETCD_PORT, TLS
 
     CONNECTION_ATTEMPTS = config['etcd']['connection_attempts']
     CONNECTION_DELAY = config['etcd']['connection_delay']
@@ -76,13 +80,26 @@ def set_globals():
     ETCD_HOST = "etcd.%s.svc.%s" % (config['namespace'],
                                     config['cluster_domain'])
     ETCD_PORT = int(config['etcd']['client_port']['cont'])
+    TLS = config['security']['tls']['enabled']
 
 
 def get_etcd_client():
 
+    if TLS:
+        protocol = 'https'
+        cert = (SERVER_CERT, SERVER_KEY)
+        ca_cert = CA_CERT
+    else:
+        protocol = 'http'
+        cert = None
+        ca_cert = None
+
     return etcd.Client(host=ETCD_HOST,
                        port=ETCD_PORT,
                        allow_reconnect=True,
+                       protocol=protocol,
+                       cert=cert,
+                       ca_cert=ca_cert,
                        read_timeout=2)
 
 
