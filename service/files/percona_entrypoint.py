@@ -24,7 +24,12 @@ INIT_FILE = os.path.join(DATADIR, 'init.ok')
 PID_FILE = os.path.join(DATADIR, "mysqld.pid")
 GRASTATE_FILE = os.path.join(DATADIR, 'grastate.dat')
 SST_FLAG = os.path.join(DATADIR, "sst_in_progress")
+DHPARAM = os.path.join(DATADIR, "dhparams.pem")
 GLOBALS_PATH = '/etc/ccp/globals/globals.json'
+
+CA_CERT = '/opt/ccp/etc/tls/ca.pem'
+SERVER_CERT = '/opt/ccp/etc/tls/server-cert.pem'
+SERVER_KEY = '/opt/ccp/etc/tls/server-key.pem'
 
 LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
 LOG_FORMAT = "%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s"
@@ -44,6 +49,8 @@ CONNECTION_DELAY = None
 ETCD_PATH = None
 ETCD_HOST = None
 ETCD_PORT = None
+TLS = None
+DHPARAM_CERT = None
 
 
 class ProcessException(Exception):
@@ -76,7 +83,8 @@ def get_config():
     variables = {}
     with open(GLOBALS_PATH) as f:
         global_conf = json.load(f)
-    for key in ['percona', 'db', 'etcd', 'namespace', 'cluster_domain']:
+    for key in ['percona', 'db', 'etcd', 'namespace', 'cluster_domain',
+                'security']:
         variables[key] = global_conf[key]
     LOG.debug(variables)
     return variables
@@ -88,7 +96,7 @@ def set_globals():
     global MYSQL_ROOT_PASSWORD, CLUSTER_NAME, XTRABACKUP_PASSWORD
     global MONITOR_PASSWORD, CONNECTION_ATTEMPTS, CONNECTION_DELAY
     global ETCD_PATH, ETCD_HOST, ETCD_PORT, EXPECTED_NODES
-    global FORCE_BOOTSTRAP, FORCE_BOOTSTRAP_NODE
+    global FORCE_BOOTSTRAP, FORCE_BOOTSTRAP_NODE, TLS, DHPARAM_CERT
 
     FORCE_BOOTSTRAP = config['percona']['force_bootstrap']['enabled']
     FORCE_BOOTSTRAP_NODE = config['percona']['force_bootstrap']['node']
@@ -103,6 +111,8 @@ def set_globals():
     ETCD_HOST = "etcd.%s.svc.%s" % (config['namespace'],
                                     config['cluster_domain'])
     ETCD_PORT = int(config['etcd']['client_port']['cont'])
+    TLS = config['security']['tls']['enabled']
+    DHPARAM_CERT = config['security']['tls']['dhparam']
 
 
 def get_mysql_client(insecure=False):
@@ -118,9 +128,21 @@ def get_mysql_client(insecure=False):
 
 def get_etcd_client():
 
+    if TLS:
+        protocol = 'https'
+        cert = (SERVER_CERT, SERVER_KEY)
+        ca_cert = CA_CERT
+    else:
+        protocol = 'http'
+        cert = None
+        ca_cert = None
+
     return etcd.Client(host=ETCD_HOST,
                        port=ETCD_PORT,
                        allow_reconnect=True,
+                       protocol=protocol,
+                       cert=cert,
+                       ca_cert=ca_cert,
                        read_timeout=2)
 
 
@@ -132,6 +154,15 @@ def datadir_cleanup(path):
             shutil.rmtree(fullpath)
         else:
             os.remove(fullpath)
+
+
+def create_dhparam():
+    if not os.path.isfile(DHPARAM):
+        with open(DHPARAM, 'w') as f:
+            f.write(DHPARAM_CERT)
+            LOG.info("dhparam cert created in %s", DHPARAM)
+    else:
+        LOG.info("%s exists, not overriding it", DHPARAM)
 
 
 def create_init_flag():
@@ -156,6 +187,7 @@ def run_cmd(cmd, check_result=False):
 
 def run_mysqld(available_nodes, donors_list, etcd_client, lock):
 
+    create_dhparam()
     cmd = ("mysqld --user=mysql --wsrep_cluster_name=%s"
            " --wsrep_cluster_address=%s"
            " --wsrep_sst_method=xtrabackup-v2"
@@ -476,7 +508,9 @@ def wait_for_mysqld(proc):
 def wait_for_mysqld_to_start(proc, insecure):
 
     LOG.info("Waiting mysql to start...")
-    time.sleep(5)
+    # Sometimes initial mysql start could take some time, especialy with SSL
+    # enabled. FIXME - replace sleep with some additional checks.
+    time.sleep(30)
     while True:
         if check_if_sst_running():
             LOG.debug("SST sync detected, waiting...")
