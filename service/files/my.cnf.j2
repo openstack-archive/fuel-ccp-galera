@@ -2,6 +2,12 @@
 bind-address = 0.0.0.0
 port = 33306
 
+{% if percona.ssl.enabled %}
+ssl-ca = /etc/mysql/certs/ca.pem
+ssl-cert = /etc/mysql/certs/server-cert.pem
+ssl-key = /etc/mysql/certs/server-key.pem
+{% endif %}
+
 datadir = /var/lib/mysql
 pid-file = /var/lib/mysql/mysqld.pid
 log-error = /var/log/ccp/mysql/mysql.log
