@@ -448,7 +448,7 @@ def wait_for_mysqld(proc):
 def wait_for_mysqld_to_start(proc, insecure):
 
     LOG.info("Waiting mysql to start...")
-    for i in range(0, 29):
+    for i in range(0, 199):
         try:
             mysql_client = get_mysql_client(insecure=insecure)
             mysql_exec(mysql_client, [("SELECT 1", None)])
