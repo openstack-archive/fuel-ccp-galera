@@ -33,11 +33,16 @@ PID_FILE = os.path.join(DATADIR, "mysqld.pid")
 HOSTNAME = socket.getfqdn()
 IPADDR = socket.gethostbyname(HOSTNAME)
 
+CA_CERT = '/opt/ccp/etc/tls/ca.pem'
+SERVER_CERT = '/opt/ccp/etc/tls/server-cert.pem'
+SERVER_KEY = '/opt/ccp/etc/tls/server-key.pem'
+
 MONITOR_PASSWORD = None
 CLUSTER_NAME = None
 ETCD_PATH = None
 ETCD_HOST = None
 ETCD_PORT = None
+ETCD_TLS = None
 
 
 def retry(f):
@@ -64,11 +69,22 @@ def retry(f):
 
 def get_etcd_client():
 
-        etcd_client = etcd.Client(host=ETCD_HOST,
-                                  port=ETCD_PORT,
-                                  allow_reconnect=True,
-                                  read_timeout=2)
-        return etcd_client
+    if ETCD_TLS:
+        protocol = 'https'
+        cert = (SERVER_CERT, SERVER_KEY)
+        ca_cert = CA_CERT
+    else:
+        protocol = 'http'
+        cert = None
+        ca_cert = None
+
+    return etcd.Client(host=ETCD_HOST,
+                       port=ETCD_PORT,
+                       allow_reconnect=True,
+                       protocol=protocol,
+                       cert=cert,
+                       ca_cert=ca_cert,
+                       read_timeout=2)
 
 
 @retry
@@ -287,7 +303,7 @@ def get_config():
     variables = {}
     with open(GLOBALS_PATH) as f:
         global_conf = json.load(f)
-    for key in ['percona', 'etcd', 'namespace', 'cluster_domain']:
+    for key in ['percona', 'etcd', 'namespace', 'cluster_domain', 'security']:
         variables[key] = global_conf[key]
     LOG.debug(variables)
     return variables
@@ -297,7 +313,7 @@ def set_globals():
 
     config = get_config()
     global MONITOR_PASSWORD, CLUSTER_NAME
-    global ETCD_PATH, ETCD_HOST, ETCD_PORT
+    global ETCD_PATH, ETCD_HOST, ETCD_PORT, ETCD_TLS
 
     CLUSTER_NAME = config['percona']['cluster_name']
     MONITOR_PASSWORD = config['percona']['monitor_password']
@@ -305,6 +321,7 @@ def set_globals():
     ETCD_HOST = "etcd.%s.svc.%s" % (config['namespace'],
                                     config['cluster_domain'])
     ETCD_PORT = int(config['etcd']['client_port']['cont'])
+    ETCD_TLS = config['etcd']['tls']['enabled']
 
 
 if __name__ == "__main__":
