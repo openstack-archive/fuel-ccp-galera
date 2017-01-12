@@ -37,7 +37,7 @@ wsrep_provider = /usr/lib/galera3/libgalera_smm.so
 wsrep_cluster_name = {{ percona.cluster_name }}
 wsrep_sst_method = xtrabackup-v2
 wsrep_sst_auth = "xtrabackup:{{ percona.xtrabackup_password }}"
-wsrep_provider_options = "gcache.size={{ percona.gcache_size }}"
+wsrep_provider_options = "gcache.size={{ percona.gcache_size }};gcache.recover=yes"
 
 {% if percona.ssl.enabled %}
 [client]
