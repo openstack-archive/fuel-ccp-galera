@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 
 import fileinput
-import functools
-import json
 import logging
 import os
 import os.path
@@ -15,7 +13,15 @@ import sys
 import time
 
 import etcd
-import pymysql.cursors
+
+from entrypoint_utils import retry
+from entrypoint_utils import get_config
+from entrypoint_utils import get_etcd_client
+from entrypoint_utils import get_mysql_client
+from entrypoint_utils import etcd_set
+from entrypoint_utils import etcd_get
+from entrypoint_utils import etcd_register_in_path
+from entrypoint_utils import etcd_deregister_in_path
 
 HOSTNAME = socket.getfqdn()
 IPADDR = socket.gethostbyname(HOSTNAME)
@@ -31,6 +37,7 @@ logging.basicConfig(format=LOG_FORMAT, datefmt=LOG_DATEFMT)
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.DEBUG)
 
+MYSQL_SOCK = '/var/run/mysqld/mysqld.sock'
 FORCE_BOOTSTRAP = None
 FORCE_BOOTSTRAP_NODE = None
 EXPECTED_NODES = None
@@ -41,8 +48,7 @@ MONITOR_PASSWORD = None
 CONNECTION_ATTEMPTS = None
 CONNECTION_DELAY = None
 ETCD_PATH = None
-ETCD_HOST = None
-ETCD_PORT = None
+ETCD_HOSTS = None
 
 
 class ProcessException(Exception):
@@ -52,41 +58,11 @@ class ProcessException(Exception):
         super(ProcessException, self).__init__(self.msg)
 
 
-def retry(f):
-    @functools.wraps(f)
-    def wrap(*args, **kwargs):
-        attempts = CONNECTION_ATTEMPTS
-        delay = CONNECTION_DELAY
-        while attempts > 1:
-            try:
-                return f(*args, **kwargs)
-            except etcd.EtcdException as e:
-                LOG.warning('Etcd is not ready: %s', str(e))
-                LOG.warning('Retrying in %d seconds...', delay)
-                time.sleep(delay)
-                attempts -= 1
-        return f(*args, **kwargs)
-    return wrap
+def set_globals(config):
 
-
-def get_config():
-
-    LOG.info("Getting global variables from %s", GLOBALS_PATH)
-    variables = {}
-    with open(GLOBALS_PATH) as f:
-        global_conf = json.load(f)
-    for key in ['percona', 'db', 'etcd', 'namespace']:
-        variables[key] = global_conf[key]
-    LOG.debug(variables)
-    return variables
-
-
-def set_globals():
-
-    config = get_config()
     global MYSQL_ROOT_PASSWORD, CLUSTER_NAME, XTRABACKUP_PASSWORD
     global MONITOR_PASSWORD, CONNECTION_ATTEMPTS, CONNECTION_DELAY
-    global ETCD_PATH, ETCD_HOST, ETCD_PORT, EXPECTED_NODES
+    global ETCD_PATH, ETCD_HOSTS, EXPECTED_NODES
     global FORCE_BOOTSTRAP, FORCE_BOOTSTRAP_NODE
 
     FORCE_BOOTSTRAP = config['percona']['force_bootstrap']['enabled']
@@ -99,27 +75,9 @@ def set_globals():
     CONNECTION_DELAY = config['etcd']['connection_delay']
     EXPECTED_NODES = int(config['percona']['cluster_size'])
     ETCD_PATH = "/galera/%s" % config['percona']['cluster_name']
-    ETCD_HOST = "etcd.%s" % config['namespace']
-    ETCD_PORT = int(config['etcd']['client_port']['cont'])
-
-
-def get_mysql_client(insecure=False):
-
-    password = '' if insecure else MYSQL_ROOT_PASSWORD
-    return pymysql.connect(unix_socket='/var/run/mysqld/mysqld.sock',
-                           user='root',
-                           password=password,
-                           connect_timeout=1,
-                           read_timeout=1,
-                           cursorclass=pymysql.cursors.DictCursor)
-
-
-def get_etcd_client():
-
-    return etcd.Client(host=ETCD_HOST,
-                       port=ETCD_PORT,
-                       allow_reconnect=True,
-                       read_timeout=2)
+    etcd_host = "etcd.%s.svc.cluster.local" % config['namespace']
+    etcd_port = int(config['etcd']['client_port']['cont'])
+    ETCD_HOSTS = ((etcd_host, etcd_port),)
 
 
 def datadir_cleanup(path):
@@ -169,10 +127,10 @@ def run_mysqld(available_nodes, etcd_client, lock):
 
     def sig_handler(signum, frame):
         LOG.info("Caught a signal: %d", signum)
-        etcd_deregister_in_path(etcd_client, 'queue')
-        etcd_deregister_in_path(etcd_client, 'nodes')
-        etcd_deregister_in_path(etcd_client, 'seqno')
-        etcd_deregister_in_path(etcd_client, 'leader', prevValue=IPADDR)
+        for path in ['seqno', 'queue', 'nodes', 'leader']:
+            key = os.path.join(ETCD_PATH, path, IPADDR)
+            prevValue = IPADDR if path == 'leader' else False
+            etcd_deregister_in_path(etcd_client, key, prevValue=prevValue)
         release_lock(lock)
         mysqld_proc.send_signal(signum)
 
@@ -190,12 +148,11 @@ def mysql_exec(mysql_client, sql_list):
         return cursor.fetchall()
 
 
-@retry
 def fetch_status(etcd_client, path):
 
     key = os.path.join(ETCD_PATH, path)
     try:
-        root = etcd_client.get(key)
+        root = etcd_get(etcd_client, key)
     except etcd.EtcdKeyNotFound:
         LOG.debug("Current nodes in %s is: %s", key, None)
         return []
@@ -210,14 +167,14 @@ def fetch_status(etcd_client, path):
 def fetch_wsrep_data():
 
     wsrep_data = {}
-    mysql_client = get_mysql_client()
+    mysql_client = retry(get_mysql_client, 3)(unix_socket=MYSQL_SOCK,
+                                              password=MYSQL_ROOT_PASSWORD)
     data = mysql_exec(mysql_client, [("SHOW STATUS LIKE 'wsrep%'", None)])
     for i in data:
         wsrep_data[i['Variable_name']] = i['Value']
     return wsrep_data
 
 
-@retry
 def get_oldest_node_by_seqno(etcd_client, path):
 
     """
@@ -228,7 +185,7 @@ def get_oldest_node_by_seqno(etcd_client, path):
 
     """
     key = os.path.join(ETCD_PATH, path)
-    root = etcd_client.get(key)
+    root = retry(etcd_get, CONNECTION_ATTEMPTS)(etcd_client, key)
     # We need to cut etcd path prefix like "/galera/k8scluster/seqno/" to get
     # the IP addr of the node.
     prefix = key + "/"
@@ -240,38 +197,11 @@ def get_oldest_node_by_seqno(etcd_client, path):
     return result[-1][0]
 
 
-@retry
-def _etcd_set(etcd_client, path, value, ttl):
-
-    key = os.path.join(ETCD_PATH, path)
-    etcd_client.set(key, value, ttl=ttl)
-    LOG.info("Set %s with value '%s'", key, value)
-
-
-def etcd_register_in_path(etcd_client, path, ttl=60):
-
-    key = os.path.join(path, IPADDR)
-    _etcd_set(etcd_client, key, time.time(), ttl)
-
-
 def etcd_set_seqno(etcd_client, ttl):
 
     seqno = mysql_get_seqno()
-    key = os.path.join('seqno', IPADDR)
-    _etcd_set(etcd_client, key, seqno, ttl)
-
-
-def etcd_deregister_in_path(etcd_client, path, prevValue=False):
-
-    key = os.path.join(ETCD_PATH, path, IPADDR)
-    try:
-        if prevValue:
-            etcd_client.delete(key, prevValue=prevValue)
-        else:
-            etcd_client.delete(key, recursive=True)
-        LOG.warning("Deleted key %s", key)
-    except etcd.EtcdKeyNotFound:
-        LOG.warning("Key %s not exist", key)
+    key = os.path.join(ETCD_PATH, 'seqno', IPADDR)
+    retry(etcd_set, CONNECTION_ATTEMPTS)(etcd_client, key, seqno, ttl)
 
 
 def mysql_get_seqno():
@@ -430,12 +360,14 @@ def update_uuid(etcd_client):
 
     wsrep_data = fetch_wsrep_data()
     uuid = wsrep_data['wsrep_cluster_state_uuid']
-    _etcd_set(etcd_client, 'uuid', uuid, ttl=None)
+    key = os.path.join(ETCD_PATH, 'uuid')
+    retry(etcd_set, CONNECTION_ATTEMPTS)(etcd_client, key, uuid, ttl=None)
 
 
 def update_cluster_state(etcd_client, state):
 
-    _etcd_set(etcd_client, 'state', state, ttl=None)
+    key = os.path.join(ETCD_PATH, 'state')
+    retry(etcd_set, CONNECTION_ATTEMPTS)(etcd_client, key, state, ttl=None)
 
 
 def wait_for_mysqld(proc):
@@ -448,9 +380,11 @@ def wait_for_mysqld(proc):
 def wait_for_mysqld_to_start(proc, insecure):
 
     LOG.info("Waiting mysql to start...")
-    for i in range(0, 29):
+    password = '' if insecure else MYSQL_ROOT_PASSWORD
+    for i in range(0, 199):
         try:
-            mysql_client = get_mysql_client(insecure=insecure)
+            mysql_client = get_mysql_client(unix_socket=MYSQL_SOCK,
+                                            password=password)
             mysql_exec(mysql_client, [("SELECT 1", None)])
             return
         except Exception:
@@ -503,7 +437,7 @@ def mysql_init():
                 ("DROP DATABASE IF EXISTS test", None),
                 ("FLUSH PRIVILEGES", None)]
     try:
-        mysql_client = get_mysql_client(insecure=True)
+        mysql_client = retry(get_mysql_client, 3, 1)(unix_socket=MYSQL_SOCK)
         mysql_exec(mysql_client, sql_list)
     except Exception:
         raise
@@ -557,7 +491,8 @@ def run_create_queue(etcd_client, lock, ttl):
     """
 
     LOG.info("Creating recovery queue")
-    etcd_register_in_path(etcd_client, 'queue', ttl=None)
+    key = os.path.join(ETCD_PATH, 'queue', IPADDR)
+    etcd_register_in_path(etcd_client, key, ttl=None)
     etcd_set_seqno(etcd_client, ttl=None)
     release_lock(lock)
     wait_for_expected_state(etcd_client, ttl)
@@ -590,10 +525,12 @@ def run_join_cluster(etcd_client, lock, ttl):
         set_safe_to_bootstrap()
     mysqld = run_mysqld(available_nodes, etcd_client, lock)
     wait_for_sync(mysqld)
-    etcd_register_in_path(etcd_client, 'nodes', ttl)
+    key = os.path.join(ETCD_PATH, 'nodes', IPADDR)
+    etcd_register_in_path(etcd_client, key, ttl)
     if state == "RECOVERY":
-        etcd_deregister_in_path(etcd_client, 'seqno')
-        etcd_deregister_in_path(etcd_client, 'queue')
+        for path in ['seqno', 'queue']:
+            key = os.path.join(ETCD_PATH, path, IPADDR)
+            etcd_deregister_in_path(etcd_client, key)
     last_one = check_if_im_last(etcd_client)
     release_lock(lock)
     return (first_one, last_one, mysqld)
@@ -635,7 +572,7 @@ def main(ttl):
 
     try:
         LOG.debug("My IP is: %s", IPADDR)
-        etcd_client = get_etcd_client()
+        etcd_client = retry(get_etcd_client, CONNECTION_ATTEMPTS)(ETCD_HOSTS)
         lock = etcd.Lock(etcd_client, 'galera')
         acquire_lock(lock, ttl)
         check_cluster(etcd_client)
@@ -670,16 +607,16 @@ def main(ttl):
     except Exception:
         raise
     finally:
-        etcd_deregister_in_path(etcd_client, 'queue')
-        etcd_deregister_in_path(etcd_client, 'nodes')
-        etcd_deregister_in_path(etcd_client, 'seqno')
-        etcd_deregister_in_path(etcd_client, 'leader', prevValue=IPADDR)
+        for path in ['seqno', 'queue', 'nodes', 'leader']:
+            key = os.path.join(ETCD_PATH, path, IPADDR)
+            prevValue = IPADDR if path == 'leader' else False
+            etcd_deregister_in_path(etcd_client, key, prevValue=prevValue)
         release_lock(lock)
 
 
 if __name__ == "__main__":
-    get_config()
-    set_globals()
+    config = get_config(GLOBALS_PATH, ['percona', 'db', 'etcd', 'namespace'])
+    set_globals(config)
     main(ttl=300)
 
 # vim: set ts=4 sw=4 tw=0 et :
