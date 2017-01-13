@@ -7,6 +7,7 @@ COPY sudoers /etc/sudoers.d/haproxy_sudoers
 RUN apt-get update \
     && apt-get install -y -t testing haproxy \
     && apt-get clean \
+    && pip install pymysql \
     && chown -R haproxy: /etc/haproxy /var/lib/haproxy \
     && usermod -a -G microservices haproxy
 
