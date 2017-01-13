@@ -2,17 +2,21 @@
 
 import argparse
 import BaseHTTPServer
-import functools
-import json
 import logging
 import os
 import os.path
 import socket
 import sys
-import time
 
 import etcd
-import pymysql.cursors
+
+from entrypoint_utils import retry
+from entrypoint_utils import get_config
+from entrypoint_utils import get_etcd_client
+from entrypoint_utils import get_mysql_client
+from entrypoint_utils import etcd_delete
+from entrypoint_utils import etcd_read
+from entrypoint_utils import etcd_register_in_path
 
 # Galera states
 JOINING_STATE = 1
@@ -38,63 +42,19 @@ IPADDR = socket.gethostbyname(HOSTNAME)
 MONITOR_PASSWORD = None
 CLUSTER_NAME = None
 ETCD_PATH = None
-ETCD_HOST = None
-ETCD_PORT = None
-
-
-def retry(f):
-    @functools.wraps(f)
-    def wrap(*args, **kwargs):
-        attempts = 3
-        delay = 1
-        while attempts > 1:
-            try:
-                return f(*args, **kwargs)
-            except etcd.EtcdException as e:
-                LOG.warning('Etcd is not ready: %s', str(e))
-                LOG.warning('Retrying in %d seconds...', delay)
-                time.sleep(delay)
-                attempts -= 1
-            except pymysql.OperationalError as e:
-                LOG.warning('Mysql is not ready: %s', str(e))
-                LOG.warning('Retrying in %d seconds...', delay)
-                time.sleep(delay)
-                attempts -= 1
-        return f(*args, **kwargs)
-    return wrap
-
-
-def get_etcd_client():
-
-        etcd_client = etcd.Client(host=ETCD_HOST,
-                                  port=ETCD_PORT,
-                                  allow_reconnect=True,
-                                  read_timeout=2)
-        return etcd_client
-
-
-@retry
-def get_mysql_client():
-        mysql_client = pymysql.connect(host='127.0.0.1',
-                                       port=33306,
-                                       user='monitor',
-                                       password=MONITOR_PASSWORD,
-                                       connect_timeout=1,
-                                       read_timeout=1,
-                                       cursorclass=pymysql.cursors.DictCursor)
-        return mysql_client
+ETCD_HOSTS = None
 
 
 class GaleraChecker(object):
     def __init__(self):
-        self.etcd_client = get_etcd_client()
+        self.etcd_client = get_etcd_client(ETCD_HOSTS)
         # Liveness check runs every 10 seconds with 5 seconds timeout (default)
         self.ttl = 20
 
-    @retry
     def fetch_wsrep_data(self):
         data = {}
-        mysql_client = get_mysql_client()
+        mysql_client = retry(get_mysql_client, 3)(user='monitor',
+                                                  password=MONITOR_PASSWORD)
         with mysql_client.cursor() as cursor:
             sql = "SHOW STATUS LIKE 'wsrep%'"
             cursor.execute(sql)
@@ -161,6 +121,7 @@ class GaleraChecker(object):
         global WAS_JOINED
         global OLD_STATE
         wsrep_data = self.fetch_wsrep_data()
+        node_key = os.path.join(ETCD_PATH, 'nodes', IPADDR)
 
         # If local uuid is different - we have a split brain.
         cluster_uuid = self.etcd_get_cluster_uuid()
@@ -178,7 +139,7 @@ class GaleraChecker(object):
         if state == SYNCED_STATE or state == DONOR_DESYNCED_STATE:
             WAS_JOINED = True
             LOG.info("State OK: %s", state_comment)
-            self.etcd_register_in_path('nodes')
+            etcd_register_in_path(self.etcd_client, node_key, self.ttl)
             return True
         elif state == JOINED_STATE and WAS_JOINED:
             # Node was in the JOINED_STATE in prev check too. Seems to it can't
@@ -186,62 +147,42 @@ class GaleraChecker(object):
             if OLD_STATE == JOINED_STATE:
                 LOG.error("State BAD: %s", state_comment)
                 LOG.error("Joined, but not syncing")
-                self._etcd_delete()
+                key = os.path.join(ETCD_PATH, 'nodes', IPADDR)
+                etcd_delete(self.etcd_client, key)
                 return False
             else:
                 LOG.info("State OK: %s", state_comment)
                 LOG.info("Probably will sync soon")
-                self.etcd_register_in_path('nodes')
+                etcd_register_in_path(self.etcd_client, node_key, self.ttl)
                 return False
         else:
             LOG.info("State OK: %s", state_comment)
             LOG.info("Just joined")
             WAS_JOINED = True
-            self.etcd_register_in_path('nodes')
+            etcd_register_in_path(self.etcd_client, node_key, self.ttl)
             return True
         OLD_STATE = state
         LOG.warning("Unknown state: %s", state_comment)
         return True
 
-    @retry
-    def _etcd_delete(self):
-
-        key = os.path.join(ETCD_PATH, 'nodes', IPADDR)
-        self.etcd_client.delete(key, recursive=True, dir=True)
-        LOG.warning("Deleted node's key '%s'", key)
-
-    @retry
-    def _etcd_set(self, data):
-
-        self.etcd_client.set(data[0], data[1], self.ttl)
-        LOG.info("Set %s with value '%s'", data[0], data[1])
-
-    @retry
-    def _etcd_read(self, path):
-
-        key = os.path.join(ETCD_PATH, path)
-        return self.etcd_client.read(key).value
-
-    def etcd_register_in_path(self, path):
-
-        key = os.path.join(ETCD_PATH, path, IPADDR)
-        self._etcd_set((key, time.time()))
-
     def etcd_check_if_cluster_ready(self):
 
+        key = os.path.join(ETCD_PATH, 'state')
         try:
-            state = self._etcd_read('state')
+            state = etcd_read(self.etcd_client, key)
             return True if state == 'STEADY' else False
         except etcd.EtcdKeyNotFound:
             return False
 
     def etcd_get_cluster_uuid(self):
 
-        return self._etcd_read('uuid')
+        key = os.path.join(ETCD_PATH, 'uuid')
+        return etcd_read(self.etcd_client, key)
 
     def check_cluster_state(self):
 
-        state = self._etcd_read('state')
+        key = os.path.join(ETCD_PATH, 'state')
+        state = etcd_read(self.etcd_client, key)
         if state != 'STEADY':
             LOG.error("Cluster state is not STEADY")
             sys.exit(1)
@@ -281,29 +222,17 @@ def run_readiness():
     sys.exit(0) if ready else sys.exit(1)
 
 
-def get_config():
+def set_globals(config):
 
-    LOG.info("Getting global variables from %s", GLOBALS_PATH)
-    variables = {}
-    with open(GLOBALS_PATH) as f:
-        global_conf = json.load(f)
-    for key in ['percona', 'etcd', 'namespace']:
-        variables[key] = global_conf[key]
-    LOG.debug(variables)
-    return variables
-
-
-def set_globals():
-
-    config = get_config()
     global MONITOR_PASSWORD, CLUSTER_NAME
-    global ETCD_PATH, ETCD_HOST, ETCD_PORT
+    global ETCD_PATH, ETCD_HOSTS, ETCD_PORT
 
     CLUSTER_NAME = config['percona']['cluster_name']
     MONITOR_PASSWORD = config['percona']['monitor_password']
     ETCD_PATH = "/galera/%s" % config['percona']['cluster_name']
-    ETCD_HOST = "etcd.%s" % config['namespace']
-    ETCD_PORT = int(config['etcd']['client_port']['cont'])
+    etcd_host = "etcd.%s" % config['namespace']
+    etcd_port = int(config['etcd']['client_port']['cont'])
+    ETCD_HOSTS = ((etcd_host, etcd_port),)
 
 
 if __name__ == "__main__":
@@ -312,8 +241,8 @@ if __name__ == "__main__":
     parser.add_argument('type', choices=['liveness', 'readiness'])
     args = parser.parse_args()
 
-    get_config()
-    set_globals()
+    config = get_config(GLOBALS_PATH, ['percona', 'etcd', 'namespace'])
+    set_globals(config)
     if args.type == 'liveness':
         run_liveness()
     elif args.type == 'readiness':

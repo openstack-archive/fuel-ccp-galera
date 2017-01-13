@@ -15,6 +15,7 @@ service:
       daemon:
         files:
           - galera-checker
+          - entrypoint_utils
         dependencies:
           - etcd
         command: "/opt/ccp/bin/galera_checker.py liveness"
@@ -31,6 +32,7 @@ service:
         files:
           - haproxy-conf
           - haproxy_entrypoint
+          - entrypoint_utils
         dependencies:
           - etcd
         command: "/opt/ccp/bin/haproxy_entrypoint.py daemon"
@@ -77,6 +79,7 @@ service:
           - entrypoint
           - mycnf
           - galera-checker
+          - entrypoint_utils
           # {% if percona.ssl.enabled %}
           - ca.pem
           - ca-key.pem
@@ -104,6 +107,9 @@ files:
     path: /opt/ccp/bin/haproxy_entrypoint.py
     content: haproxy_entrypoint.py
     perm: "0755"
+  entrypoint_utils:
+    path: /opt/ccp/bin/entrypoint_utils.py
+    content: entrypoint_utils.py
 # {% if percona.ssl.enabled %}
   ca.pem:
     path: /etc/mysql/certs/ca.pem

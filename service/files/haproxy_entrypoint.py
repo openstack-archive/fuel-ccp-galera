@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 
 import argparse
-import functools
-import json
 import logging
 import os
 import socket
@@ -11,6 +9,12 @@ import sys
 import time
 
 import etcd
+
+from entrypoint_utils import retry
+from entrypoint_utils import get_config
+from entrypoint_utils import get_etcd_client
+from entrypoint_utils import etcd_set
+from entrypoint_utils import etcd_refresh
 
 HOSTNAME = socket.getfqdn()
 IPADDR = socket.gethostbyname(HOSTNAME)
@@ -27,62 +31,24 @@ LOG.setLevel(logging.DEBUG)
 CONNECTION_ATTEMPTS = None
 CONNECTION_DELAY = None
 ETCD_PATH = None
-ETCD_HOST = None
-ETCD_PORT = None
+ETCD_HOSTS = None
 
 # Haproxy constant for health checks
 SRV_STATE_RUNNING = 2
 SRV_CHK_RES_PASSED = 3
 
 
-def retry(f):
-    @functools.wraps(f)
-    def wrap(*args, **kwargs):
-        attempts = CONNECTION_ATTEMPTS
-        delay = CONNECTION_DELAY
-        while attempts > 1:
-            try:
-                return f(*args, **kwargs)
-            except etcd.EtcdException as e:
-                LOG.warning('Etcd is not ready: %s', str(e))
-                LOG.warning('Retrying in %d seconds...', delay)
-                time.sleep(delay)
-                attempts -= 1
-        return f(*args, **kwargs)
-    return wrap
+def set_globals(config):
 
-
-def get_config():
-
-    LOG.info("Getting global variables from %s", GLOBALS_PATH)
-    variables = {}
-    with open(GLOBALS_PATH) as f:
-        global_conf = json.load(f)
-    for key in ['percona', 'etcd', 'namespace']:
-        variables[key] = global_conf[key]
-    LOG.debug(variables)
-    return variables
-
-
-def set_globals():
-
-    config = get_config()
     global CONNECTION_ATTEMPTS, CONNECTION_DELAY
-    global ETCD_PATH, ETCD_HOST, ETCD_PORT
+    global ETCD_PATH, ETCD_HOSTS
 
     CONNECTION_ATTEMPTS = config['etcd']['connection_attempts']
     CONNECTION_DELAY = config['etcd']['connection_delay']
     ETCD_PATH = "/galera/%s" % config['percona']['cluster_name']
-    ETCD_HOST = "etcd.%s" % config['namespace']
-    ETCD_PORT = int(config['etcd']['client_port']['cont'])
-
-
-def get_etcd_client():
-
-    return etcd.Client(host=ETCD_HOST,
-                       port=ETCD_PORT,
-                       allow_reconnect=True,
-                       read_timeout=2)
+    etcd_host = "etcd.%s" % config['namespace']
+    etcd_port = int(config['etcd']['client_port']['cont'])
+    ETCD_HOSTS = ((etcd_host, etcd_port),)
 
 
 def get_socket():
@@ -107,21 +73,6 @@ def check_haproxy(proc):
         LOG.error("Haproxy was terminated, exit code was: %s",
                   proc.returncode)
         sys.exit(proc.returncode)
-
-
-@retry
-def etcd_set(etcd_client, key, value, ttl, dir=False, append=False, **kwargs):
-
-    etcd_client.write(key, value, ttl, dir, append, **kwargs)
-    LOG.info("Set %s with value '%s'", key, value)
-
-
-@retry
-def etcd_refresh(etcd_client, path, ttl):
-
-    key = os.path.join(ETCD_PATH, path)
-    etcd_client.refresh(key, ttl)
-    LOG.info("Refreshed %s ttl. New ttl is '%s'", key, ttl)
 
 
 def send_command(cmd):
@@ -210,13 +161,14 @@ def get_leader(etcd_client):
 def set_leader(etcd_client, ttl, **kwargs):
 
     key = os.path.join(ETCD_PATH, 'leader')
-    etcd_set(etcd_client, key, IPADDR, ttl, **kwargs)
+    retry(etcd_set, CONNECTION_ATTEMPTS)(etcd_client, key, IPADDR, ttl,
+                                         **kwargs)
 
 
 def refresh_leader(etcd_client, ttl):
 
     key = os.path.join(ETCD_PATH, 'leader')
-    etcd_refresh(etcd_client, key, ttl)
+    retry(etcd_refresh, CONNECTION_ATTEMPTS)(etcd_client, key, ttl)
 
 
 def do_we_need_to_reconfigure_haproxy(leader):
@@ -233,7 +185,7 @@ def run_daemon(ttl):
 
     LOG.debug("My IP is: %s", IPADDR)
     haproxy_proc = run_haproxy()
-    etcd_client = get_etcd_client()
+    etcd_client = get_etcd_client(ETCD_HOSTS)
     while True:
         wait_for_cluster_to_be_steady(etcd_client, haproxy_proc)
         leader = get_leader(etcd_client)
@@ -253,7 +205,7 @@ def run_daemon(ttl):
 
 def run_readiness():
 
-    etcd_client = get_etcd_client()
+    etcd_client = get_etcd_client(ETCD_HOSTS)
     state = get_cluster_state(etcd_client)
     if state != 'STEADY':
         LOG.error("Cluster is not in the STEADY state")
@@ -281,8 +233,8 @@ if __name__ == "__main__":
     parser.add_argument('type', choices=['daemon', 'readiness'])
     args = parser.parse_args()
 
-    get_config()
-    set_globals()
+    config = get_config(GLOBALS_PATH, ['percona', 'etcd', 'namespace'])
+    set_globals(config)
     if args.type == 'daemon':
         run_daemon(ttl=20)
     elif args.type == 'readiness':
