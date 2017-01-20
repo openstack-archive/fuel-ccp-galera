@@ -75,7 +75,7 @@ def get_config():
     variables = {}
     with open(GLOBALS_PATH) as f:
         global_conf = json.load(f)
-    for key in ['percona', 'db', 'etcd', 'namespace']:
+    for key in ['percona', 'db', 'etcd', 'namespace', 'cluster_domain']:
         variables[key] = global_conf[key]
     LOG.debug(variables)
     return variables
@@ -99,7 +99,8 @@ def set_globals():
     CONNECTION_DELAY = config['etcd']['connection_delay']
     EXPECTED_NODES = int(config['percona']['cluster_size'])
     ETCD_PATH = "/galera/%s" % config['percona']['cluster_name']
-    ETCD_HOST = "etcd.%s" % config['namespace']
+    ETCD_HOST = "etcd.%s.svc.%s" % (config['namespace'],
+                                    config['cluster_domain'])
     ETCD_PORT = int(config['etcd']['client_port']['cont'])
 
 
@@ -233,7 +234,7 @@ def get_oldest_node_by_seqno(etcd_client, path):
     # the IP addr of the node.
     prefix = key + "/"
     result = sorted([(str(child.key).replace(prefix, ''), int(child.value))
-              for child in root.children])
+                     for child in root.children])
     result.sort(key=lambda x: x[1])
     LOG.debug("ALL seqno is %s", result)
     LOG.info("Oldest node is %s, am %s", result[-1][0], IPADDR)
@@ -333,6 +334,7 @@ def wait_for_expected_state(etcd_client, ttl):
             wait_for_my_turn(etcd_client)
             break
 
+
 def wait_for_my_seqno(etcd_client):
 
         oldest_node = get_oldest_node_by_seqno(etcd_client, 'seqno')
@@ -341,6 +343,7 @@ def wait_for_my_seqno(etcd_client):
             return
         else:
             time.sleep(5)
+
 
 def wait_for_my_turn(etcd_client):
 

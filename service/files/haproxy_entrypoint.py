@@ -58,7 +58,7 @@ def get_config():
     variables = {}
     with open(GLOBALS_PATH) as f:
         global_conf = json.load(f)
-    for key in ['percona', 'etcd', 'namespace']:
+    for key in ['percona', 'etcd', 'namespace', 'cluster_domain']:
         variables[key] = global_conf[key]
     LOG.debug(variables)
     return variables
@@ -73,7 +73,8 @@ def set_globals():
     CONNECTION_ATTEMPTS = config['etcd']['connection_attempts']
     CONNECTION_DELAY = config['etcd']['connection_delay']
     ETCD_PATH = "/galera/%s" % config['percona']['cluster_name']
-    ETCD_HOST = "etcd.%s" % config['namespace']
+    ETCD_HOST = "etcd.%s.svc.%s" % (config['namespace'],
+                                    config['cluster_domain'])
     ETCD_PORT = int(config['etcd']['client_port']['cont'])
 
 
