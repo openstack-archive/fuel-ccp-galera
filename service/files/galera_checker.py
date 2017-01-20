@@ -302,7 +302,7 @@ def set_globals():
     CLUSTER_NAME = config['percona']['cluster_name']
     MONITOR_PASSWORD = config['percona']['monitor_password']
     ETCD_PATH = "/galera/%s" % config['percona']['cluster_name']
-    ETCD_HOST = "etcd.%s" % config['namespace']
+    ETCD_HOST = "etcd.%s.svc.cluster.local" % config['namespace']
     ETCD_PORT = int(config['etcd']['client_port']['cont'])
 
 

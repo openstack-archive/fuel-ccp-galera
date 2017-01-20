@@ -99,7 +99,7 @@ def set_globals():
     CONNECTION_DELAY = config['etcd']['connection_delay']
     EXPECTED_NODES = int(config['percona']['cluster_size'])
     ETCD_PATH = "/galera/%s" % config['percona']['cluster_name']
-    ETCD_HOST = "etcd.%s" % config['namespace']
+    ETCD_HOST = "etcd.%s.svc.cluster.local" % config['namespace']
     ETCD_PORT = int(config['etcd']['client_port']['cont'])
 
 
