@@ -17,7 +17,7 @@ service:
           - galera-checker
         dependencies:
           - etcd
-        command: "/opt/ccp/bin/galera_checker.py liveness"
+        command: "/opt/ccp/bin/galera_checker.py"
     - name: galera-haproxy
       image: galera-haproxy
       probes:
@@ -37,9 +37,13 @@ service:
     - name: galera
       image: percona
       probes:
-        readiness: "/opt/ccp/bin/galera_checker.py readiness"
+        readiness: 
+          path: "/readiness"
+          type: "httpGet"
+          port: 8080
+          timeout: 5
         liveness:
-          path: "/"
+          path: "/liveness"
           type: "httpGet"
           port: 8080
           timeout: 5
