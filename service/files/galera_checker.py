@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-import argparse
 import BaseHTTPServer
 import functools
 import json
@@ -8,7 +7,6 @@ import logging
 import os
 import os.path
 import socket
-import sys
 import time
 
 import etcd
@@ -112,7 +110,10 @@ class GaleraChecker(object):
 
     def check_if_galera_ready(self):
 
-        self.check_cluster_state()
+        state = self.fetch_cluster_state()
+        if state != 'STEADY':
+            LOG.error("Cluster state is not STEADY")
+            return False
         wsrep_data = self.fetch_wsrep_data()
         uuid = self.etcd_get_cluster_uuid()
 
@@ -239,24 +240,29 @@ class GaleraChecker(object):
 
         return self._etcd_read('uuid')
 
-    def check_cluster_state(self):
+    def fetch_cluster_state(self):
 
-        state = self._etcd_read('state')
-        if state != 'STEADY':
-            LOG.error("Cluster state is not STEADY")
-            sys.exit(1)
+        return self._etcd_read('state')
 
 
 class GaleraHttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     def do_GET(self):
 
-        LOG.debug("Started processing GET request")
+        uri = self.path
+        LOG.debug("Started processing GET '%s' request", uri)
+        checker = GaleraChecker()
         try:
-            checker = GaleraChecker()
-            alive = checker.check_if_galera_alive()
-            state = 200 if alive else 503
-            self.send_response(state)
+            if uri == "/liveness":
+                success = checker.check_if_galera_alive()
+            elif uri == "/readiness":
+                success = checker.check_if_galera_ready()
+            else:
+                LOG.error("Only '/liveness' and '/readiness' uri are"
+                          " supported")
+                success = False
+            response = 200 if success else 503
+            self.send_response(response)
             self.end_headers()
         except Exception as err:
             LOG.exception(err)
@@ -266,19 +272,13 @@ class GaleraHttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             LOG.debug("Finished processing GET request")
 
 
-def run_liveness(port=8080):
+def run_server(port=8080):
     server_class = BaseHTTPServer.HTTPServer
     handler_class = GaleraHttpHandler
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
     LOG.info('Starting http server...')
     httpd.serve_forever()
-
-
-def run_readiness():
-    checker = GaleraChecker()
-    ready = checker.check_if_galera_ready()
-    sys.exit(0) if ready else sys.exit(1)
 
 
 def get_config():
@@ -309,13 +309,6 @@ def set_globals():
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('type', choices=['liveness', 'readiness'])
-    args = parser.parse_args()
-
     get_config()
     set_globals()
-    if args.type == 'liveness':
-        run_liveness()
-    elif args.type == 'readiness':
-        run_readiness()
+    run_server()
