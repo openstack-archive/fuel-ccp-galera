@@ -153,15 +153,19 @@ def run_cmd(cmd, check_result=False):
     return proc
 
 
-def run_mysqld(available_nodes, etcd_client, lock):
+def run_mysqld(available_nodes, donors_list, etcd_client, lock):
 
     cmd = ("mysqld --user=mysql --wsrep_cluster_name=%s"
            " --wsrep_cluster_address=%s"
            " --wsrep_sst_method=xtrabackup-v2"
+           " --wsrep_sst_donor=%s"
            " --wsrep_node_address=%s"
+           " --wsrep_node_name=%s"
            " --pxc_strict_mode=PERMISSIVE" %
            (six.moves.shlex_quote(CLUSTER_NAME),
             "gcomm://%s" % six.moves.shlex_quote(available_nodes),
+            six.moves.shlex_quote(donors_list),
+            six.moves.shlex_quote(IPADDR),
             six.moves.shlex_quote(IPADDR)))
     mysqld_proc = run_cmd(cmd)
     wait_for_mysqld_to_start(mysqld_proc, insecure=False)
@@ -247,6 +251,16 @@ def _etcd_set(etcd_client, path, value, ttl):
     LOG.info("Set %s with value '%s'", key, value)
 
 
+def _etcd_read(etcd_client, path):
+
+    key = os.path.join(ETCD_PATH, path)
+    try:
+        value = etcd_client.read(key).value
+        return value
+    except etcd.EtcdKeyNotFound:
+        return None
+
+
 def etcd_register_in_path(etcd_client, path, ttl=60):
 
     key = os.path.join(path, IPADDR)
@@ -285,16 +299,6 @@ def mysql_get_seqno():
         LOG.warning("Can't find a '%s' file. Setting seqno to '-1'",
                     GRASTATE_FILE)
         return -1
-
-
-def get_cluster_state(etcd_client):
-
-    key = os.path.join(ETCD_PATH, 'state')
-    try:
-        state = etcd_client.read(key).value
-        return state
-    except etcd.EtcdKeyNotFound:
-        return None
 
 
 def check_for_stale_seqno(etcd_client):
@@ -419,16 +423,29 @@ def check_if_im_last(etcd_client):
         return False
 
 
-def create_join_list(status):
+def create_join_list(status, leader, donor=False):
 
     if IPADDR in status:
         status.remove(IPADDR)
+    if leader in status and donor:
+        status.remove(leader)
+
     if not status:
-        LOG.info("No available nodes found. Assuming I'm first")
-        return ("", True)
+        if donor:
+            LOG.info("No available nodes found. Using empty donor list")
+            return (",")
+        else:
+            LOG.info("No available nodes found. Assuming I'm first")
+            return ("", True)
     else:
-        LOG.info("Joining to nodes %s", ','.join(status))
-        return (','.join(status), False)
+        if donor:
+            # We need to keep trailing comma at the end
+            donor_list = "%s," % ','.join(status)
+            LOG.debug("Donor list is: '%s'", donor_list)
+            return donor_list
+        else:
+            LOG.info("Joining to nodes %s", ','.join(status))
+            return (','.join(status), False)
 
 
 def update_uuid(etcd_client):
@@ -522,7 +539,7 @@ def mysql_init():
 
 def check_cluster(etcd_client):
 
-    state = get_cluster_state(etcd_client)
+    state = _etcd_read(etcd_client, 'state')
     nodes_status = fetch_status(etcd_client, 'nodes')
     if not nodes_status and state == 'STEADY':
         LOG.warning("Cluster is in the STEADY state, but there no"
@@ -592,12 +609,14 @@ def run_join_cluster(etcd_client, lock, ttl):
 
     LOG.info("Joining the cluster")
     acquire_lock(lock, ttl)
-    state = get_cluster_state(etcd_client)
+    state = _etcd_read(etcd_client, 'state')
     nodes_status = fetch_status(etcd_client, 'nodes')
-    available_nodes, first_one = create_join_list(nodes_status)
+    leader = _etcd_read(etcd_client, 'leader')
+    available_nodes, first_one = create_join_list(nodes_status, leader)
+    donors_list = create_join_list(nodes_status, leader, donor=True)
     if first_one:
         set_safe_to_bootstrap()
-    mysqld = run_mysqld(available_nodes, etcd_client, lock)
+    mysqld = run_mysqld(available_nodes, donors_list, etcd_client, lock)
     wait_for_sync(mysqld)
     etcd_register_in_path(etcd_client, 'nodes', ttl)
     if state == "RECOVERY":
@@ -623,7 +642,7 @@ def run_update_metadata(etcd_client, first_one, last_one):
     """
 
     LOG.info("Update cluster metadata")
-    state = get_cluster_state(etcd_client)
+    state = _etcd_read(etcd_client, 'state')
     if first_one:
         update_uuid(etcd_client)
         if state != 'RECOVERY':
@@ -648,7 +667,7 @@ def main(ttl):
         lock = etcd.Lock(etcd_client, 'galera')
         acquire_lock(lock, ttl)
         check_cluster(etcd_client)
-        state = get_cluster_state(etcd_client)
+        state = _etcd_read(etcd_client, 'state')
 
         # Scenario 1: Initial bootstrap
         if state is None or state == 'BUILDING':
