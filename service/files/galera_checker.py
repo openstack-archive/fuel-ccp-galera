@@ -102,7 +102,7 @@ class GaleraChecker(object):
 
     def check_if_sst_running(self):
 
-        return True if os.path.isfile(SST_FLAG) else False
+        return os.path.isfile(SST_FLAG)
 
     def check_if_pidfile_created(self):
 

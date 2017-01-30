@@ -23,6 +23,7 @@ DATADIR = "/var/lib/mysql"
 INIT_FILE = os.path.join(DATADIR, 'init.ok')
 PID_FILE = os.path.join(DATADIR, "mysqld.pid")
 GRASTATE_FILE = os.path.join(DATADIR, 'grastate.dat')
+SST_FLAG = os.path.join(DATADIR, "sst_in_progress")
 GLOBALS_PATH = '/etc/ccp/globals/globals.json'
 
 LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
@@ -320,6 +321,11 @@ def check_for_stale_seqno(etcd_client):
                   queue_set, seqno_set)
 
 
+def check_if_sst_running():
+
+    return os.path.isfile(SST_FLAG)
+
+
 def wait_for_expected_state(etcd_client, ttl):
 
     while True:
@@ -470,7 +476,16 @@ def wait_for_mysqld(proc):
 def wait_for_mysqld_to_start(proc, insecure):
 
     LOG.info("Waiting mysql to start...")
-    for i in range(0, 299):
+    time.sleep(5)
+    while True:
+        if check_if_sst_running():
+            LOG.debug("SST sync detected, waiting...")
+            time.sleep(30)
+        else:
+            LOG.debug("No SST sync detected")
+            break
+
+    for i in range(0, 59):
         try:
             mysql_client = get_mysql_client(insecure=insecure)
             mysql_exec(mysql_client, [("SELECT 1", None)])
