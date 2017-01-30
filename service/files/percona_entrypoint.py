@@ -158,12 +158,10 @@ def run_mysqld(available_nodes, etcd_client, lock):
     cmd = ("mysqld --user=mysql --wsrep_cluster_name=%s"
            " --wsrep_cluster_address=%s"
            " --wsrep_sst_method=xtrabackup-v2"
-           " --wsrep_sst_auth=%s"
            " --wsrep_node_address=%s"
            " --pxc_strict_mode=PERMISSIVE" %
            (six.moves.shlex_quote(CLUSTER_NAME),
             "gcomm://%s" % six.moves.shlex_quote(available_nodes),
-            "xtrabackup:%s" % six.moves.shlex_quote(XTRABACKUP_PASSWORD),
             six.moves.shlex_quote(IPADDR)))
     mysqld_proc = run_cmd(cmd)
     wait_for_mysqld_to_start(mysqld_proc, insecure=False)
