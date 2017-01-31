@@ -25,6 +25,8 @@ innodb_write_io_threads = 8
 
 open_files_limit = 102400
 
+sql_mode = "ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION"
+
 wsrep_slave_threads = 4
 wsrep_cluster_address = gcomm://
 wsrep_provider = /usr/lib/galera3/libgalera_smm.so
