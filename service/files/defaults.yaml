@@ -9,6 +9,7 @@ configs:
     xtrabackup_password: "password"
     monitor_password: "password"
     gcache_size: "1G"
+    sql_mode: null
     cluster_size: 3
     force_bootstrap:
       enabled: false
