@@ -25,6 +25,10 @@ innodb_write_io_threads = 8
 
 open_files_limit = 102400
 
+{% if percona.sql_mode is defined %}
+sql_mode = "{{ percona.sql_mode }}"
+{% endif -%}
+
 wsrep_slave_threads = 4
 wsrep_cluster_address = gcomm://
 wsrep_provider = /usr/lib/galera3/libgalera_smm.so
