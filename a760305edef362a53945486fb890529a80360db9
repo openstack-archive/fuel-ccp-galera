@@ -1,0 +1,10 @@
+Code-Review+2: Sergey Reshetnyak <sreshetniak@mirantis.com>
+Code-Review+2: Andrey Pavlov <apavlov@mirantis.com>
+Workflow+1: Andrey Pavlov <apavlov@mirantis.com>
+Code-Review+1: Dmitry Klenov <dklenov@mirantis.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 13 Feb 2017 13:39:52 +0000
+Reviewed-on: https://review.openstack.org/419477
+Project: openstack/fuel-ccp-galera
+Branch: refs/heads/master
