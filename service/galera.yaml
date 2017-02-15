@@ -52,12 +52,14 @@ service:
           type: "httpGet"
           port: 8080
           timeout: 5
+          scheme: "http"
         liveness:
           path: "/liveness"
           type: "httpGet"
           port: 8080
           timeout: 5
           initialDelay: 60
+          scheme: "http"
       volumes:
         - name: mysql-logs
           path: "/var/log/ccp/mysql"
