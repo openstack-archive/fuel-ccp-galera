@@ -26,10 +26,7 @@ GRASTATE_FILE = os.path.join(DATADIR, 'grastate.dat')
 SST_FLAG = os.path.join(DATADIR, "sst_in_progress")
 DHPARAM = os.path.join(DATADIR, "dhparams.pem")
 GLOBALS_PATH = '/etc/ccp/globals/globals.json'
-
 CA_CERT = '/opt/ccp/etc/tls/ca.pem'
-SERVER_CERT = '/opt/ccp/etc/tls/server-cert.pem'
-SERVER_KEY = '/opt/ccp/etc/tls/server-key.pem'
 
 LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
 LOG_FORMAT = "%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s"
@@ -130,18 +127,15 @@ def get_etcd_client():
 
     if ETCD_TLS:
         protocol = 'https'
-        cert = (SERVER_CERT, SERVER_KEY)
         ca_cert = CA_CERT
     else:
         protocol = 'http'
-        cert = None
         ca_cert = None
 
     return etcd.Client(host=ETCD_HOST,
                        port=ETCD_PORT,
                        allow_reconnect=True,
                        protocol=protocol,
-                       cert=cert,
                        ca_cert=ca_cert,
                        read_timeout=2)
 
@@ -746,7 +740,8 @@ def main(ttl):
             LOG.info("Recovery is done. Node is ready.")
 
         wait_for_mysqld(mysqld)
-    except Exception:
+    except Exception as err:
+        LOG.exception(err)
         raise
     finally:
         etcd_deregister_in_path(etcd_client, 'queue')

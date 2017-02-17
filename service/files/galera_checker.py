@@ -32,10 +32,7 @@ SST_FLAG = os.path.join(DATADIR, "sst_in_progress")
 PID_FILE = os.path.join(DATADIR, "mysqld.pid")
 HOSTNAME = socket.getfqdn()
 IPADDR = socket.gethostbyname(HOSTNAME)
-
 CA_CERT = '/opt/ccp/etc/tls/ca.pem'
-SERVER_CERT = '/opt/ccp/etc/tls/server-cert.pem'
-SERVER_KEY = '/opt/ccp/etc/tls/server-key.pem'
 
 MONITOR_PASSWORD = None
 CLUSTER_NAME = None
@@ -71,18 +68,15 @@ def get_etcd_client():
 
     if ETCD_TLS:
         protocol = 'https'
-        cert = (SERVER_CERT, SERVER_KEY)
         ca_cert = CA_CERT
     else:
         protocol = 'http'
-        cert = None
         ca_cert = None
 
     return etcd.Client(host=ETCD_HOST,
                        port=ETCD_PORT,
                        allow_reconnect=True,
                        protocol=protocol,
-                       cert=cert,
                        ca_cert=ca_cert,
                        read_timeout=2)
 

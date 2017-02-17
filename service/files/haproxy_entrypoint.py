@@ -17,10 +17,7 @@ IPADDR = socket.gethostbyname(HOSTNAME)
 BACKEND_NAME = "galera-cluster"
 SERVER_NAME = "primary"
 GLOBALS_PATH = '/etc/ccp/globals/globals.json'
-
 CA_CERT = '/opt/ccp/etc/tls/ca.pem'
-SERVER_CERT = '/opt/ccp/etc/tls/server-cert.pem'
-SERVER_KEY = '/opt/ccp/etc/tls/server-key.pem'
 
 LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
 LOG_FORMAT = "%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s"
@@ -88,18 +85,15 @@ def get_etcd_client():
 
     if ETCD_TLS:
         protocol = 'https'
-        cert = (SERVER_CERT, SERVER_KEY)
         ca_cert = CA_CERT
     else:
         protocol = 'http'
-        cert = None
         ca_cert = None
 
     return etcd.Client(host=ETCD_HOST,
                        port=ETCD_PORT,
                        allow_reconnect=True,
                        protocol=protocol,
-                       cert=cert,
                        ca_cert=ca_cert,
                        read_timeout=2)
 
