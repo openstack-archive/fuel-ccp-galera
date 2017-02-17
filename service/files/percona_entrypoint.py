@@ -281,7 +281,7 @@ def _etcd_set(etcd_client, path, value, ttl):
 
     key = os.path.join(ETCD_PATH, path)
     etcd_client.set(key, value, ttl=ttl)
-    LOG.info("Set %s with value '%s'", key, value)
+    LOG.info("Set %s with value '%s' and ttl '%s'", key, value, ttl)
 
 
 def _etcd_read(etcd_client, path):
@@ -665,6 +665,8 @@ def run_join_cluster(etcd_client, lock, ttl):
     donors_list = create_join_list(nodes_status, leader, donor=True)
     if first_one:
         set_safe_to_bootstrap()
+        # First node shouldn't have a TTL during the cluster bootstrap
+        ttl = None
     mysqld = run_mysqld(available_nodes, donors_list, etcd_client, lock)
     wait_for_sync(mysqld)
     etcd_register_in_path(etcd_client, 'nodes', ttl)
