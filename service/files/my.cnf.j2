@@ -35,9 +35,9 @@ wsrep_provider = /usr/lib/galera3/libgalera_smm.so
 wsrep_cluster_name = {{ percona.cluster_name }}
 wsrep_sst_method = xtrabackup-v2
 wsrep_sst_auth = "xtrabackup:{{ percona.xtrabackup_password }}"
-wsrep_provider_options = "gcache.size={{ percona.gcache_size }};gcache.recover=yes{% if percona.tls.enabled %};socket.ssl=yes;socket.ssl_key=/opt/ccp/etc/tls/server-key.pem;socket.ssl_cert=/opt/ccp/etc/tls/server-cert.pem;socket.ssl_ca=/opt/ccp/etc/tls/ca.pem"{% endif %}
+wsrep_provider_options = "gcache.size={{ percona.gcache_size }};gcache.recover=yes{% if db.tls.enabled %};socket.ssl=yes;socket.ssl_key=/opt/ccp/etc/tls/server-key.pem;socket.ssl_cert=/opt/ccp/etc/tls/server-cert.pem;socket.ssl_ca=/opt/ccp/etc/tls/ca.pem"{% endif %}
 
-{% if percona.tls.enabled %}
+{% if db.tls.enabled %}
 ssl-ca = /opt/ccp/etc/tls/ca.pem
 ssl-cert = /opt/ccp/etc/tls/server-cert.pem
 ssl-key = /opt/ccp/etc/tls/server-key.pem

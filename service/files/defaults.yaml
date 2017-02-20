@@ -4,6 +4,8 @@ configs:
   db:
     root_password: "password"
     max_timeout: 60
+    tls:
+      enabled: true
   percona:
     cluster_name: "k8scluster"
     xtrabackup_password: "password"
@@ -15,7 +17,7 @@ configs:
       enabled: false
       node: null
     port:
-      cont: 3306
+      cont: 3306 
     tls:
       enabled: true
 url:
