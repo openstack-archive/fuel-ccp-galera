@@ -15,7 +15,7 @@ service:
       daemon:
         files:
           - galera-checker
-          # {% if percona.tls.enabled %}
+          # {% if db.tls.enabled %}
           - ca.pem
           - server-key.pem
           - server-cert.pem
@@ -36,7 +36,7 @@ service:
         files:
           - haproxy-conf
           - haproxy_entrypoint
-          # {% if percona.tls.enabled %}
+          # {% if db.tls.enabled %}
           - ca.pem
           - server-key.pem
           - server-cert.pem
@@ -79,7 +79,7 @@ service:
           - entrypoint
           - mycnf
           - galera-checker
-          # {% if percona.tls.enabled %}
+          # {% if db.tls.enabled %}
           - ca.pem
           - server-key.pem
           - server-cert.pem
@@ -107,7 +107,7 @@ files:
     path: /opt/ccp/bin/haproxy_entrypoint.py
     content: haproxy_entrypoint.py
     perm: "0755"
-# {% if percona.tls.enabled %}
+# {% if db.tls.enabled %}
   ca.pem:
     path: /opt/ccp/etc/tls/ca.pem
     content: ca.pem.j2
