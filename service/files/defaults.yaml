@@ -18,8 +18,6 @@ configs:
       node: null
     port:
       cont: 3306
-    tls:
-      enabled: true
 url:
   percona:
     debian:
