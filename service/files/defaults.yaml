@@ -2,6 +2,9 @@ configs:
   service:
     database: galera
   db:
+    slow_query_log_enabled: false
+    long_query_time: 1
+    general_log_enabled: false
     root_password: "password"
     max_timeout: 60
     tls:
