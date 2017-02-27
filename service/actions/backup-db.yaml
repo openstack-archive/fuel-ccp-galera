@@ -1,0 +1,13 @@
+actions:
+  - name: backup-db
+    image: mysql-client
+    dependencies:
+      - {{ serivce.database }}
+    parameters:
+      - key: db
+        default_value: null
+    command: /opt/bin/backup-db.sh
+    files:
+      - path: /opt/bin/backup-db.sh
+        content: backup-db.sh.j2
+        perm: "0700"

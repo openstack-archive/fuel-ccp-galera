@@ -1,0 +1,6 @@
+FROM {{ image_spec("base-tools") }}
+MAINTAINER {{ maintainer }}
+
+RUN apt-get update \
+    && apt-get install -y --force-yes --no-install-recommends mysql-client \
+    && apt-get clean
