@@ -1,0 +1,10 @@
+Code-Review+1: Sergey Kraynev <skraynev@mirantis.com>
+Code-Review+2: Artur Zarzycki <azarzycki@mirantis.com>
+Code-Review+2: Yuriy Taraday <yorik.sar@gmail.com>
+Workflow+1: Yuriy Taraday <yorik.sar@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 27 Feb 2017 12:30:52 +0000
+Reviewed-on: https://review.openstack.org/438461
+Project: openstack/fuel-ccp-galera
+Branch: refs/heads/master
