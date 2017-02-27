@@ -1,6 +1,4 @@
 configs:
-  service:
-    database: galera
   db:
     root_password: "password"
     max_timeout: 60
