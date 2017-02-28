@@ -1,6 +1,4 @@
 configs:
-  service:
-    database: galera
   db:
     slow_query_log_enabled: false
     long_query_time: 1
