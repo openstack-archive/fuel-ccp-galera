@@ -9,6 +9,7 @@ configs:
     max_timeout: 60
     tls:
       enabled: true
+    wsrep_debug: false
   percona:
     cluster_name: "k8scluster"
     xtrabackup_password: "password"
