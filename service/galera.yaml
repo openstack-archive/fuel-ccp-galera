@@ -1,6 +1,6 @@
 dsl_version: 0.2.0
 service:
-  name: {{ service.database }}
+  name: galera
   antiAffinity: local
   ports:
     - {{ percona.port }}
