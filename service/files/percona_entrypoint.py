@@ -26,6 +26,7 @@ GRASTATE_FILE = os.path.join(DATADIR, 'grastate.dat')
 SST_FLAG = os.path.join(DATADIR, "sst_in_progress")
 DHPARAM = os.path.join(DATADIR, "dhparams.pem")
 GLOBALS_PATH = '/etc/ccp/globals/globals.json'
+GLOBALS_SECRETS_PATH = '/etc/ccp/global-secrets/global-secrets.json'
 CA_CERT = '/opt/ccp/etc/tls/ca.pem'
 
 LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
@@ -74,12 +75,25 @@ def retry(f):
     return wrap
 
 
-def get_config():
+def merge_configs(variables, new_config):
+    for k, v in new_config.items():
+        if k not in variables:
+            variables[k] = v
+            continue
+        if isinstance(v, dict) and isinstance(variables[k], dict):
+            merge_configs(variables[k], v)
+        else:
+            variables[k] = v
 
+
+def get_config():
     LOG.info("Getting global variables from %s", GLOBALS_PATH)
     variables = {}
     with open(GLOBALS_PATH) as f:
         global_conf = json.load(f)
+    with open(GLOBALS_SECRETS_PATH) as f:
+        secrets = json.load(f)
+    merge_configs(global_conf, secrets)
     for key in ['percona', 'db', 'etcd', 'namespace', 'cluster_domain',
                 'security']:
         variables[key] = global_conf[key]

@@ -5,14 +5,11 @@ configs:
     slow_query_log_enabled: false
     long_query_time: 1
     general_log_enabled: false
-    root_password: "password"
     max_timeout: 60
     tls:
       enabled: true
   percona:
     cluster_name: "k8scluster"
-    xtrabackup_password: "password"
-    monitor_password: "password"
     gcache_size: "1G"
     sql_mode: null
     cluster_size: 3
@@ -21,6 +18,14 @@ configs:
       node: null
     port:
       cont: 3306
+
+secret_configs:
+  db:
+    root_password: "password"
+  percona:
+    xtrabackup_password: "password"
+    monitor_password: "password"
+
 url:
   percona:
     debian:
