@@ -27,6 +27,7 @@ LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.DEBUG)
 
 GLOBALS_PATH = "/etc/ccp/globals/globals.json"
+GLOBALS_SECRETS_PATH = '/etc/ccp/global-secrets/global-secrets.json'
 DATADIR = "/var/lib/mysql"
 SST_FLAG = os.path.join(DATADIR, "sst_in_progress")
 PID_FILE = os.path.join(DATADIR, "mysqld.pid")
@@ -291,12 +292,26 @@ def run_server(port=8080):
     httpd.serve_forever()
 
 
+def merge_configs(variables, new_config):
+    for k, v in new_config.items():
+        if k not in variables:
+            variables[k] = v
+            continue
+        if isinstance(v, dict) and isinstance(variables[k], dict):
+            merge_configs(variables[k], v)
+        else:
+            variables[k] = v
+
+
 def get_config():
 
     LOG.info("Getting global variables from %s", GLOBALS_PATH)
     variables = {}
     with open(GLOBALS_PATH) as f:
         global_conf = json.load(f)
+    with open(GLOBALS_SECRETS_PATH) as f:
+        secrets = json.load(f)
+    merge_configs(global_conf, secrets)
     for key in ['percona', 'etcd', 'namespace', 'cluster_domain']:
         variables[key] = global_conf[key]
     LOG.debug(variables)
