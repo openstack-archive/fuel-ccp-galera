@@ -46,7 +46,7 @@ ETCD_TLS = None
 def retry(f):
     @functools.wraps(f)
     def wrap(*args, **kwargs):
-        attempts = 3
+        attempts = 4
         delay = 1
         while attempts > 1:
             try:
