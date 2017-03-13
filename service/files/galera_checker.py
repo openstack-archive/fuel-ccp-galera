@@ -47,7 +47,7 @@ def retry(f):
     @functools.wraps(f)
     def wrap(*args, **kwargs):
         attempts = 3
-        delay = 1
+        delay = 5
         while attempts > 1:
             try:
                 return f(*args, **kwargs)

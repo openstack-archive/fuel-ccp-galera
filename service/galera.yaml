@@ -57,7 +57,7 @@ service:
           path: "/liveness"
           type: "httpGet"
           port: 8080
-          timeout: 5
+          timeout: 30
           initialDelay: 60
           scheme: "http"
       volumes:
