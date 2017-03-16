@@ -216,7 +216,7 @@ def run_mysqld(available_nodes, donors_list, etcd_client, lock):
         etcd_deregister_in_path(etcd_client, 'queue')
         etcd_deregister_in_path(etcd_client, 'nodes')
         etcd_deregister_in_path(etcd_client, 'seqno')
-        etcd_deregister_in_path(etcd_client, 'leader', prevValue=IPADDR)
+        etcd_delete_if_exists(etcd_client, 'leader')
         release_lock(lock)
         mysqld_proc.send_signal(signum)
 
@@ -315,14 +315,21 @@ def etcd_set_seqno(etcd_client, ttl):
     _etcd_set(etcd_client, key, seqno, ttl)
 
 
-def etcd_deregister_in_path(etcd_client, path, prevValue=False):
+def etcd_delete_if_exists(etcd_client, path, prevValue):
+
+    key = os.path.join(ETCD_PATH, path)
+    try:
+        etcd_client.delete(key, prevValue=prevValue)
+        LOG.warning("Deleted key %s, with previous value '%s'", key, prevValue)
+    except etcd.EtcdKeyNotFound:
+        LOG.warning("Key %s not exist", key)
+
+
+def etcd_deregister_in_path(etcd_client, path):
 
     key = os.path.join(ETCD_PATH, path, IPADDR)
     try:
-        if prevValue:
-            etcd_client.delete(key, prevValue=prevValue)
-        else:
-            etcd_client.delete(key, recursive=True)
+        etcd_client.delete(key, recursive=True)
         LOG.warning("Deleted key %s", key)
     except etcd.EtcdKeyNotFound:
         LOG.warning("Key %s not exist", key)
@@ -761,7 +768,7 @@ def main(ttl):
         etcd_deregister_in_path(etcd_client, 'queue')
         etcd_deregister_in_path(etcd_client, 'nodes')
         etcd_deregister_in_path(etcd_client, 'seqno')
-        etcd_deregister_in_path(etcd_client, 'leader', prevValue=IPADDR)
+        etcd_delete_if_exists(etcd_client, 'leader')
         release_lock(lock)
 
 
