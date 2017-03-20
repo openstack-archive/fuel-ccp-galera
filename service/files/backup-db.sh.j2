@@ -1,0 +1,12 @@
+#!/bin/bash
+
+set -ex
+
+DB_NAME="{{ action_parameters.db }}"
+BACKUP_FILE="/var/ccp/backup/${DB_NAME}/backup-$(date "+%Y%m%d%H%M%S").sql"
+
+mkdir -p "$(dirname ${BACKUP_FILE})"
+
+mysqldump {% if db.tls.enabled %} --ssl-mode REQUIRED {% endif %} -h {{ address(service.database) }} \
+    -uroot -p{{ db.root_password }} \
+    --single-transaction --routines --triggers "${DB_NAME}" > "${BACKUP_FILE}"
