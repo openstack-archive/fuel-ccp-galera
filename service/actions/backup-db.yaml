@@ -2,7 +2,7 @@ actions:
   - name: backup-db
     image: mysql-client
     dependencies:
-      - {{ serivce.database }}
+      - database
     parameters:
       - key: db
         default_value: null
