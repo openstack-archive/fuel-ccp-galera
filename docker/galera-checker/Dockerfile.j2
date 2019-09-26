@@ -1,7 +1,0 @@
-FROM {{ image_spec("base-tools") }}
-MAINTAINER {{ maintainer }}
-
-RUN pip install pymysql \
-    && useradd --user-group -G microservices mysql
-
-USER mysql
